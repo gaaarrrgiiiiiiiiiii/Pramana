@@ -32,9 +32,15 @@ export default function LoginPage() {
 
       router.push("/");
     } catch (err: any) {
-      setError(
-        err.response?.data?.detail || "Authentication failed. Check your badge credentials."
-      );
+      const detail = err.response?.data?.detail;
+      const errorText = typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+        ? detail.map((d: any) => d.msg || d.type || JSON.stringify(d)).join("; ")
+        : typeof detail === "object" && detail !== null
+        ? JSON.stringify(detail)
+        : "Authentication failed. Check your badge credentials.";
+      setError(errorText);
     } finally {
       setLoading(false);
     }

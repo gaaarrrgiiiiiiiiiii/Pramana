@@ -81,11 +81,20 @@ export default function ChatInterface({
         window.location.href = "/login";
         return;
       }
+      const detail = err.response?.data?.detail;
+      const errorText = typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+        ? detail.map((d: any) => d.msg || d.type || JSON.stringify(d)).join("; ")
+        : typeof detail === "object" && detail !== null
+        ? JSON.stringify(detail)
+        : "Network Error: Could not reach backend.";
+
       setMessages((prev) => [
         ...prev,
         {
           role: "agent",
-          text: err.response?.data?.detail || "Network Error: Could not reach backend.",
+          text: errorText,
         },
       ]);
       onQueryComplete(null);

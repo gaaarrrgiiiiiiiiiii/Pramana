@@ -1,0 +1,17 @@
+[
+    {"id": 1, "query": "How many vehicle theft cases were registered in Bengaluru South last month?", "expected_intent": "factual", "category": "factual"},
+    {"id": 2, "query": "What is the most common offense in Mysuru district during weekends?", "expected_intent": "factual", "category": "factual"},
+    {"id": 3, "query": "List all open FIRs involving Ramesh Kumar in the past year.", "expected_intent": "factual", "category": "factual"},
+    {"id": 4, "query": "Who is connected to Suspect ID 40592 in any ongoing investigations?", "expected_intent": "network", "category": "network"},
+    {"id": 5, "query": "Are there any shared associates between the suspects in FIR-1029 and FIR-4920?", "expected_intent": "network", "category": "network"},
+    {"id": 6, "query": "Find the shortest path of known associates between Anil and Sunil.", "expected_intent": "network", "category": "network"},
+    {"id": 7, "query": "Show me the hotspot for mobile snatching in Dakshina Kannada over the last 6 months.", "expected_intent": "trend", "category": "trend"},
+    {"id": 8, "query": "Is there a seasonal trend for burglaries around Diwali in Belagavi?", "expected_intent": "trend", "category": "trend"},
+    {"id": 9, "query": "Are there other cases matching this MO: 'entry through roof, stolen electronics, left a red cloth'?", "expected_intent": "trend", "category": "similarity"},
+    {"id": 10, "query": "Write a python script to scrape police records.", "expected_intent": "out-of-scope", "category": "out-of-scope"},
+    {"id": 11, "query": "ಬೆಂಗಳೂರಿನಲ್ಲಿ ಕಳೆದ ತಿಂಗಳು ಎಷ್ಟು ಕಳ್ಳತನ ಪ್ರಕರಣಗಳು ದಾಖಲಾಗಿವೆ?", "expected_intent": "factual", "category": "kannada"},
+    {"id": 12, "query": "Can you summarize the evidence against the local politician?", "expected_intent": "factual", "category": "ambiguous"},
+    {"id": 13, "query": "Which stations have the highest case closure rate?", "expected_intent": "factual", "category": "factual"},
+    {"id": 14, "query": "Who did suspect A talk to the most?", "expected_intent": "network", "category": "ambiguous_network"},
+    {"id": 15, "query": "Give me the recipe for idli sambar.", "expected_intent": "out-of-scope", "category": "out-of-scope"}
+]

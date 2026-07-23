@@ -35,7 +35,7 @@ app.include_router(hotspot_router)
 class QueryRequest(BaseModel):
     query: str
     language: str = "Kannada"
-    session_id: int = None
+    session_id: int | None = None
     conversation_history: list = []
 
 class QueryResponse(BaseModel):

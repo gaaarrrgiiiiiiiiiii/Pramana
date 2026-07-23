@@ -18,9 +18,9 @@ def get_db_connection():
 
 @router.get("/api/hotspots")
 def get_crime_hotspots(
-    crime_group: str = Query(None),
-    year: int = Query(None),
-    district: str = Query(None),
+    crime_group: str | None = Query(None),
+    year: int | None = Query(None),
+    district: str | None = Query(None),
     limit: int = Query(500)
 ):
     """

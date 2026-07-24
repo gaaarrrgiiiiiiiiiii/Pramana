@@ -62,12 +62,39 @@ CREATE TABLE IF NOT EXISTS messages (
     language         VARCHAR(50) DEFAULT 'English',
     intent           VARCHAR(50),
     confidence       FLOAT   DEFAULT 0.0,
+    feedback         SMALLINT DEFAULT NULL,  -- +1 helpful, -1 not helpful, NULL = no response
     created_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_user    ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
-CREATE INDEX IF NOT EXISTS idx_messages_user    ON messages(user_id);
+-- ──────────────────────────────────────────────
+-- ACTIVITY_LOG  (system audit — who did what when)
+-- Different from messages: this records EVERY API action, not just answers.
+-- Answers the question: "Who accessed suspect X's record on Tuesday?"
+-- ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS activity_log (
+    id            SERIAL PRIMARY KEY,
+    request_id    VARCHAR(24) NOT NULL,       -- UUID hex for correlating log lines
+    user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username      VARCHAR(100),
+    role          VARCHAR(50),
+    action        VARCHAR(100) NOT NULL,      -- e.g. 'query', 'login', 'session_view', 'export'
+    endpoint      VARCHAR(200),               -- e.g. '/api/query'
+    query_text    TEXT,                       -- raw query if applicable
+    intent        VARCHAR(50),               -- router classification
+    was_blocked   BOOLEAN DEFAULT FALSE,
+    block_reason  TEXT,
+    status_code   SMALLINT,
+    latency_ms    INTEGER,
+    ip_address    VARCHAR(45),
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user       ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_session    ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_user       ON messages(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_user       ON activity_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_created    ON activity_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_action     ON activity_log(action);
 """
 
 DEMO_USERS = [

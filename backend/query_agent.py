@@ -74,7 +74,9 @@ Table `fir_raw` (1.6M rows — mirrors the full CSV; use for counts, trends, and
 
 QUERY GUIDELINES:
 - ALWAYS LIMIT queries returning individual rows to 50 rows max.
-- For counts, totals, and trend analysis, ALWAYS query fir_raw — it has all 1.6M records.
+- For counts, totals, and trend analysis, ALWAYS query `fir_raw` — it has all 1.6M records.
+- ALWAYS query `crime_group ILIKE '%...%'` for crime categories (e.g., `crime_group ILIKE '%ACCIDENT%'` for motor vehicle accidents, `crime_group ILIKE '%THEFT%'` for theft, `crime_group ILIKE '%CYBER%'` for cybercrime).
+- DO NOT query `crime_head` for broad crime categories like accidents, theft, cybercrime, or murder; `crime_head` contains specific legal sections.
 - Use ILIKE for case-insensitive string matching.
 - Always use read-only SELECT statements.
 """
@@ -95,6 +97,7 @@ _DISTRICT_MAP = {
 }
 
 _CRIME_MAP = {
+    "motor vehicle accident": "ACCIDENT", "motor vehicle": "ACCIDENT", "traffic accident": "ACCIDENT", "vehicle accident": "ACCIDENT",
     "theft": "THEFT", "thft": "THEFT", "stealing": "THEFT",
     "murder": "MURDER", "homicide": "MURDER",
     "rape": "RAPE", "assault": "ASSAULT",

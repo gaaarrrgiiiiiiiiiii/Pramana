@@ -2,20 +2,18 @@ import re
 
 # ─── HARD BLOCKS (applies to ALL roles, even SCRB Analyst) ─────────────────
 # These are specific sensitive request patterns that should always be blocked.
+# Sensitive request patterns that should always be blocked.
 BLOCKED_PATTERNS = [
-    # Victim PII
-    r"\bvictim.*address\b",
-    r"\bvictim.*phone\b",
-    r"\bvictim.*mobile\b",
-    r"\bvictim.*contact\b",
-    r"\baddress.*rape.*victim\b",
-    r"\bphone.*assault.*victim\b",
-    # Perpetrator demographic profiling
-    r"\bcrime.*by (muslim|hindu|christian|sikh|dalit|brahmin|scheduled caste|obc|forward caste)\b",
-    r"\bwhich (community|religion|caste|race) (commit|commits|has the most|is responsible)\b",
-    r"\b(muslim|hindu|christian|sikh|dalit|brahmin).*crime rate\b",
-    r"\bethnic.*profil\b",
-    r"\bcaste.*criminal\b",
+    # Victim PII (addresses, phone numbers, contact info of victims of sensitive crimes like rape/assault)
+    r"\bvictim\w*.*(address|phone|mobile|contact)\w*\b",
+    r"\b(address|phone|mobile|contact)\w*.*victim\w*\b",
+    
+    # Perpetrator demographic/religious/caste/ethnic/class profiling
+    r"\b(muslim|hindu|christian|sikh|dalit|brahmin|scheduled caste|obc|forward caste)s?\b",
+    r"\b(religion|caste|ethnic|ethnicity|race|caste-based|religious group)s?\b",
+    r"\b(community|communities|economic class)\b.*\b(theft|murder|crime|criminal|arrest|rate|breakdown|responsible)\b",
+    r"\b(theft|murder|crime|criminal|arrest|rate|breakdown|responsible)\b.*\b(community|communities|economic class)\b",
+    r"\bnames? suggest\b",
 ]
 
 # ─── Role-specific restrictions ─────────────────────────────────────────────
@@ -41,16 +39,24 @@ def check_rbac(user_query: str, role: str) -> dict:
     """
     Fast, deterministic rule-based RBAC check.
     Returns {'is_allowed': bool, 'reason': str}.
-
-    Replaces the previous LLM-based check which was unreliable
-    (failed closed on Gemini API errors, blocking all queries).
     """
     query_lower = user_query.lower().strip()
     normalised_role = _normalise_role(role)
 
+    # Allow legitimate queries about caste-based discrimination/violence (SC/ST Act cases)
+    is_legitimate_civil_rights = any(
+        w in query_lower for w in [
+            "discrimination", "atrocity", "atrocities", "motive",
+            "sc/st", "sc-st", "hate crime", "protest"
+        ]
+    )
+
     # 1. Hard blocks for all roles
     for pattern in BLOCKED_PATTERNS:
         if re.search(pattern, query_lower):
+            # If it's a perpetrator profiling pattern but matches civil rights keywords, allow it
+            if is_legitimate_civil_rights and "victim" not in pattern:
+                continue
             return {
                 "is_allowed": False,
                 "reason": (
@@ -68,6 +74,5 @@ def check_rbac(user_query: str, role: str) -> dict:
                     "reason": "Field Officers cannot access national-level SCRB aggregate reports."
                 }
 
-    # 3. Everything else is allowed — the semantic router will further classify
-    #    out-of-scope queries (recipes, weather, etc.) and decline them gracefully.
+    # 3. Everything else is allowed
     return {"is_allowed": True, "reason": ""}

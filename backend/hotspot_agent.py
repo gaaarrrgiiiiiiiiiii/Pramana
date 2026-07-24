@@ -21,12 +21,21 @@ def get_crime_hotspots(
     crime_group: str | None = Query(None),
     year: int | None = Query(None),
     district: str | None = Query(None),
-    limit: int = Query(500)
+    limit: int = 500
 ):
     """
     Fetches latitude/longitude coordinate clusters for crime hotspot visualization.
     Only returns valid non-null coordinates.
     """
+    if hasattr(limit, "default"):
+        limit = limit.default or 500
+    if hasattr(crime_group, "default"):
+        crime_group = crime_group.default
+    if hasattr(year, "default"):
+        year = year.default
+    if hasattr(district, "default"):
+        district = district.default
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 

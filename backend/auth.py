@@ -9,7 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header
 from pydantic import BaseModel
 from migrations import verify_password, hash_password
 
-SECRET_KEY = os.environ.get("JWT_SECRET", "karnataka_police_secret_key_2026_datathon")
+SECRET_KEY = os.environ.get("JWT_SECRET")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "FATAL: JWT_SECRET environment variable is not set. "
+        "Set it in .env before starting the server. "
+        "Example: JWT_SECRET=your-256-bit-random-secret"
+    )
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
@@ -128,27 +135,39 @@ def list_sessions(current_user: dict = Depends(get_current_user)):
     user_id = current_user.get("id")
     district = current_user.get("district")
 
-    if role == "SCRB Analyst":
+    if role in ("SCRB Analyst", "DGP"):
+        # Highest clearance: see ALL sessions across all officers
         cur.execute("""
-            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district
+            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district,
+                   COUNT(m.id) as message_count
             FROM sessions s
             JOIN users u ON s.user_id = u.id
+            LEFT JOIN messages m ON m.session_id = s.id
+            GROUP BY s.id, u.username, u.full_name, u.badge_number, u.role, u.district
             ORDER BY s.updated_at DESC
         """)
     elif role == "Inspector":
+        # Mid-level: see own sessions + Field Officers in same district
         cur.execute("""
-            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district
+            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district,
+                   COUNT(m.id) as message_count
             FROM sessions s
             JOIN users u ON s.user_id = u.id
+            LEFT JOIN messages m ON m.session_id = s.id
             WHERE u.district = %s OR s.user_id = %s
+            GROUP BY s.id, u.username, u.full_name, u.badge_number, u.role, u.district
             ORDER BY s.updated_at DESC
         """, (district, user_id))
     else:
+        # Field Officer: own sessions only
         cur.execute("""
-            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district
+            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district,
+                   COUNT(m.id) as message_count
             FROM sessions s
             JOIN users u ON s.user_id = u.id
+            LEFT JOIN messages m ON m.session_id = s.id
             WHERE s.user_id = %s
+            GROUP BY s.id, u.username, u.full_name, u.badge_number, u.role, u.district
             ORDER BY s.updated_at DESC
         """, (user_id,))
 
@@ -173,3 +192,40 @@ def get_session_details(session_id: int, current_user: dict = Depends(get_curren
     cur.close()
     conn.close()
     return {"session": session, "messages": messages}
+
+
+@router.delete("/api/sessions/{session_id}", tags=["Auth & Sessions"])
+def delete_session(session_id: int, current_user: dict = Depends(get_current_user)):
+    """
+    Delete a session and all its messages.
+    - Field Officers / Inspectors: can delete only their own sessions.
+    - SCRB Analyst / DGP: can delete any session (compliance purge).
+    Deletion is permanent and non-reversible.
+    """
+    conn = get_db_connection()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+
+    # Verify session exists
+    cur.execute("SELECT * FROM sessions WHERE id = %s", (session_id,))
+    session = cur.fetchone()
+    if not session:
+        cur.close(); conn.close()
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    role    = current_user.get("role")
+    user_id = current_user.get("id")
+
+    # Enforce ownership unless SCRB/DGP
+    if role not in ("SCRB Analyst", "DGP") and session["user_id"] != user_id:
+        cur.close(); conn.close()
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete your own sessions unless you have SCRB Analyst clearance"
+        )
+
+    cur.execute("DELETE FROM sessions WHERE id = %s", (session_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"status": "deleted", "session_id": session_id}
+

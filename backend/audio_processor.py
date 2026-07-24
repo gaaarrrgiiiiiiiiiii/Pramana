@@ -39,11 +39,34 @@ async def process_voice_query(
             except sr.UnknownValueError:
                 raise HTTPException(status_code=400, detail="Could not understand audio.")
                 
+        from auth import create_access_token
+        
+        # Map roles to valid database user IDs
+        role_id_map = {
+            "SCRB Analyst": 1,
+            "Inspector": 2,
+            "Field Officer": 4,
+            "DGP": 1
+        }
+        user_id = role_id_map.get(role, 4)
+        
+        token_payload = {
+            "sub": f"voice_{role.lower().replace(' ', '_')}",
+            "id": user_id,
+            "full_name": f"Voice User {role}",
+            "role": role,
+            "badge_number": f"BADGE_VOICE_{role.upper().replace(' ', '_')}",
+            "district": "Bengaluru"
+        }
+        token = create_access_token(token_payload)
+        headers = {"Authorization": f"Bearer {token}"}
+
         # 3. Pass to Agent Pipeline via local HTTP call
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post(
                 "http://127.0.0.1:8000/api/query",
-                json={"query": transcribed_text, "role": role}
+                json={"query": transcribed_text},
+                headers=headers
             )
             if res.status_code != 200:
                 raise HTTPException(status_code=res.status_code, detail=res.text)

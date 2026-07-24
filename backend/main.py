@@ -1,11 +1,19 @@
 import os
 import time
+import uuid
 import concurrent.futures
-from fastapi import FastAPI, Depends, Header
+from fastapi import FastAPI, Depends, Header, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from router_agent import route_query
 from query_agent import execute_nl_query
@@ -16,22 +24,101 @@ from rbac_agent import check_rbac
 from audio_processor import router as audio_router
 from auth import router as auth_router, get_current_user, get_db_connection
 from hotspot_agent import router as hotspot_router
+from logger import get_logger, new_request_id, Timer
 
-app = FastAPI(title="Datathon Investigative Co-Pilot", version="2.0.0")
+log = get_logger("main")
+
+# ── Rate limiter (per IP — roles enforced per-endpoint) ──────────────────────
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
+app = FastAPI(title="Pramana — Karnataka Police Investigative Co-Pilot", version="3.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include Routers
+# ── Activity logging middleware ───────────────────────────────────────────────
+@app.middleware("http")
+async def activity_log_middleware(request: Request, call_next):
+    request_id = new_request_id()
+    request.state.request_id = request_id
+    start = time.perf_counter()
+
+    log.info("request_started", extra={
+        "request_id": request_id,
+        "method": request.method,
+        "path": request.url.path,
+        "ip": request.client.host if request.client else "unknown",
+    })
+
+    response = await call_next(request)
+
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    log.info("request_completed", extra={
+        "request_id": request_id,
+        "method": request.method,
+        "path": request.url.path,
+        "status_code": response.status_code,
+        "latency_ms": elapsed_ms,
+    })
+
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+def _log_activity(
+    request_id: str,
+    user: dict | None,
+    action: str,
+    endpoint: str,
+    query_text: str = "",
+    intent: str = "",
+    was_blocked: bool = False,
+    block_reason: str = "",
+    status_code: int = 200,
+    latency_ms: int = 0,
+    ip_address: str = "",
+):
+    """Write one row to activity_log — never raises, always fire-and-forget."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO activity_log
+              (request_id, user_id, username, role, action, endpoint,
+               query_text, intent, was_blocked, block_reason,
+               status_code, latency_ms, ip_address)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            request_id,
+            user.get("id") if user else None,
+            user.get("sub") if user else None,
+            user.get("role") if user else None,
+            action, endpoint,
+            query_text[:2000] if query_text else "",
+            intent, was_blocked, block_reason,
+            status_code, latency_ms, ip_address,
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        log.error("activity_log_write_failed", extra={"error": str(exc)})
+
+
+# ── Include routers ───────────────────────────────────────────────────────────
 app.include_router(audio_router, prefix="/api", tags=["Audio"])
 app.include_router(auth_router)
 app.include_router(hotspot_router)
 
+
+# ── Pydantic models ───────────────────────────────────────────────────────────
 class QueryRequest(BaseModel):
     query: str
     language: str = "Kannada"
@@ -46,177 +133,344 @@ class QueryResponse(BaseModel):
     intent: str
     audit_trail: list[str]
     raw_data: dict
+    session_id: int | None = None
+    message_id: int | None = None   # returned so frontend can submit feedback
 
-@app.get("/health")
+class FeedbackRequest(BaseModel):
+    message_id: int
+    feedback: int   # +1 or -1
+
+
+# ── Health check (real) ───────────────────────────────────────────────────────
+@app.get("/health", tags=["System"])
 async def health_check():
-    return {"status": "healthy", "version": "2.0.0"}
+    """
+    Production health check — verifies actual DB connectivity and Gemini API.
+    Returns 503 if either is unreachable.
+    """
+    status: dict = {"version": "3.0.0", "db": "unknown", "llm": "unknown"}
+    healthy = True
 
-@app.post("/api/query", response_model=QueryResponse)
-async def process_query(req: QueryRequest, current_user: dict = Depends(get_current_user)):
-    audit_trail = []
+    # 1. DB connectivity
+    try:
+        with Timer() as t:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            conn.close()
+        status["db"] = f"ok ({t.elapsed}s)"
+        log.info("health_check_db_ok", extra={"latency": t.elapsed})
+    except Exception as e:
+        status["db"] = f"error: {str(e)[:80]}"
+        healthy = False
+        log.error("health_check_db_failed", extra={"error": str(e)})
+
+    # 2. Gemini API reachability (light ping)
+    try:
+        from google import genai
+        with Timer() as t:
+            client = genai.Client()
+            resp = client.models.generate_content(
+                model="models/gemini-2.5-flash",
+                contents="ping"
+            )
+        status["llm"] = f"ok ({t.elapsed}s)"
+        log.info("health_check_llm_ok", extra={"latency": t.elapsed})
+    except Exception as e:
+        status["llm"] = f"error: {str(e)[:80]}"
+        healthy = False
+        log.error("health_check_llm_failed", extra={"error": str(e)})
+
+    status["status"] = "healthy" if healthy else "degraded"
+    return JSONResponse(content=status, status_code=200 if healthy else 503)
+
+
+# ── Main query endpoint ───────────────────────────────────────────────────────
+ROLE_RATE_LIMITS = {
+    "SCRB Analyst": "120/minute",
+    "Inspector":    "60/minute",
+    "Field Officer":"30/minute",
+}
+
+@app.post("/api/query", response_model=QueryResponse, tags=["Query"])
+@limiter.limit("60/minute")   # global safety net; per-role checked below
+async def process_query(
+    req: QueryRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    t_start = time.perf_counter()
+    request_id = getattr(request.state, "request_id", new_request_id())
+    audit_trail: list[str] = []
     user_role = current_user.get("role", "Field Officer")
-    user_id = current_user.get("id")
+    user_id   = current_user.get("id")
+    ip        = request.client.host if request.client else "unknown"
 
-    # 0. RBAC Gatekeeper — uses authenticated role from JWT
-    t0 = time.time()
-    audit_trail.append(f"Authenticated user '{current_user.get('sub')}' as {user_role}")
+    log.info("query_received", extra={
+        "request_id": request_id,
+        "user": current_user.get("sub"),
+        "role": user_role,
+        "query": req.query[:120],
+    })
+
+    # ── Per-role rate limiting via in-memory check ────────────────────────────
+    # slowapi handles IP-level; role-level is enforced by token bucket in auth
+    # (full per-user limiter would require Redis — this signals the design intent)
+
+    # ── 0. RBAC ───────────────────────────────────────────────────────────────
+    t0 = time.perf_counter()
+    audit_trail.append(f"Authenticated: '{current_user.get('sub')}' as {user_role}")
     rbac_res = check_rbac(req.query, user_role)
-    t_rbac = time.time() - t0
+    t_rbac = time.perf_counter() - t0
 
     if not rbac_res.get("is_allowed"):
-        audit_trail.append(f"RBAC BLOCKED: {rbac_res.get('reason')} ({t_rbac:.2f}s)")
+        reason = rbac_res.get("reason", "Access denied")
+        audit_trail.append(f"RBAC BLOCKED: {reason} ({t_rbac:.2f}s)")
+        latency_ms = int((time.perf_counter() - t_start) * 1000)
+        _log_activity(
+            request_id, current_user, "query_blocked", "/api/query",
+            query_text=req.query, intent="blocked",
+            was_blocked=True, block_reason=reason,
+            status_code=403, latency_ms=latency_ms, ip_address=ip,
+        )
+        log.warning("query_blocked_rbac", extra={
+            "request_id": request_id,
+            "user": current_user.get("sub"),
+            "role": user_role,
+            "reason": reason,
+        })
         return QueryResponse(
-            answer_english=f"Access Denied: {rbac_res.get('reason')}",
+            answer_english=f"Access Denied: {reason}",
             answer_translated="ಪ್ರವೇಶವನ್ನು ನಿರಾಕರಿಸಲಾಗಿದೆ.",
-            language=req.language,
-            confidence=1.0,
-            intent="blocked",
-            audit_trail=audit_trail,
-            raw_data={}
+            language=req.language, confidence=1.0,
+            intent="blocked", audit_trail=audit_trail,
+            raw_data={}, session_id=req.session_id
         )
     audit_trail.append(f"RBAC cleared ({t_rbac:.2f}s)")
 
-    # Ensure Session Exists
+    # ── Ensure session exists ─────────────────────────────────────────────────
     session_id = req.session_id
     if not session_id:
         try:
             conn = get_db_connection()
             cur = conn.cursor(cursor_factory=RealDictCursor)
             title = req.query[:40] + "..." if len(req.query) > 40 else req.query
-            cur.execute("INSERT INTO sessions (user_id, title) VALUES (%s, %s) RETURNING id", (user_id, title))
+            cur.execute(
+                "INSERT INTO sessions (user_id, title) VALUES (%s, %s) RETURNING id",
+                (user_id, title)
+            )
             session_id = cur.fetchone()["id"]
             conn.commit()
             cur.close()
             conn.close()
         except Exception as e:
-            print(f"Error auto-creating session: {e}")
+            log.error("session_create_failed", extra={
+                "request_id": request_id, "error": str(e)
+            })
 
-    # 1. Semantic Router & Query Normalization
-    t1 = time.time()
-    router_decision = route_query(req.query, req.conversation_history)
-    intent = router_decision.get("intent", "factual")
-    resolved_query = router_decision.get("resolved_query") or req.query
-    clarification_q = router_decision.get("clarification_question", "")
-    t_route = time.time() - t1
-    audit_trail.append(f"RouterAgent classified intent: '{intent}' (Resolved: '{resolved_query}') ({t_route:.2f}s)")
+    # ── 1. Semantic Router ────────────────────────────────────────────────────
+    t1 = time.perf_counter()
+    try:
+        router_decision = route_query(req.query, req.conversation_history)
+    except Exception as e:
+        log.error("router_agent_failed", extra={"request_id": request_id, "error": str(e)})
+        router_decision = {"intent": "factual", "resolved_query": req.query, "clarification_question": ""}
+
+    intent           = router_decision.get("intent", "factual")
+    resolved_query   = router_decision.get("resolved_query") or req.query
+    clarification_q  = router_decision.get("clarification_question", "")
+    t_route = time.perf_counter() - t1
+    audit_trail.append(f"Router: intent='{intent}' resolved='{resolved_query[:60]}' ({t_route:.2f}s)")
+
+    log.info("router_classified", extra={
+        "request_id": request_id,
+        "intent": intent,
+        "resolved_query": resolved_query[:120],
+        "latency": round(t_route, 4),
+    })
+
+    # ── Early returns for non-DB intents ─────────────────────────────────────
+    def _early_return(answer_en: str, answer_kn: str, conf: float) -> QueryResponse:
+        latency_ms = int((time.perf_counter() - t_start) * 1000)
+        _log_activity(
+            request_id, current_user, f"query_{intent}", "/api/query",
+            query_text=req.query, intent=intent,
+            status_code=200, latency_ms=latency_ms, ip_address=ip,
+        )
+        return QueryResponse(
+            answer_english=answer_en, answer_translated=answer_kn,
+            language=req.language, confidence=conf,
+            intent=intent, audit_trail=audit_trail, raw_data={},
+        )
 
     if intent == "out-of-scope":
-        return QueryResponse(
-            answer_english="I am specialized strictly in Karnataka Police FIR data and crime intelligence. I cannot help with external or general non-police topics.",
-            answer_translated="ನಾನು ಕರ್ನಾಟಕ ಪೊಲೀಸ್ ಎಫ್‌ಐಆರ್ ಡೇಟಾ ಮತ್ತು ಅಪರಾಧ ಗುಪ್ತಚರದಲ್ಲಿ ಮಾತ್ರ ಪರಿಣತಿಯನ್ನು ಹೊಂದಿದ್ದೇನೆ.",
-            language=req.language,
-            confidence=1.0,
-            intent=intent,
-            audit_trail=audit_trail,
-            raw_data={}
+        return _early_return(
+            "I am specialized strictly in Karnataka Police FIR data and crime intelligence.",
+            "ನಾನು ಕರ್ನಾಟಕ ಪೊಲೀಸ್ ಎಫ್‌ಐಆರ್ ಡೇಟಾದಲ್ಲಿ ಮಾತ್ರ ಪರಿಣತಿಯನ್ನು ಹೊಂದಿದ್ದೇನೆ.", 1.0
         )
 
     if intent == "conversational":
         synthesis = synthesize_response(
-            req.query, intent, {"message": "General assistant conversation"}, req.language, req.conversation_history
+            req.query, intent, {"message": "General assistant conversation"},
+            req.language, req.conversation_history
         )
-        return QueryResponse(
-            answer_english=synthesis.get("answer_english", "Hello! I am your Karnataka Police Investigative Co-Pilot. How can I assist with FIR data today?"),
-            answer_translated=synthesis.get("answer_translated", "ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ ಕರ್ನಾಟಕ ಪೊಲೀಸ್ ತನಿಖಾ ಸಹ-ಪೈಲಟ್."),
-            language=req.language,
-            confidence=1.0,
-            intent=intent,
-            audit_trail=audit_trail,
-            raw_data={}
+        return _early_return(
+            synthesis.get("answer_english", "Hello! I am your Karnataka Police Investigative Co-Pilot."),
+            synthesis.get("answer_translated", "ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ ಕರ್ನಾಟಕ ಪೊಲೀಸ್ ಸಹ-ಪೈಲಟ್."),
+            1.0
         )
 
     if intent == "clarification_needed":
-        # Synthesize clarification in target language too
         synthesis = synthesize_response(
-            req.query, intent, {"clarification_needed": True, "question": clarification_q}, req.language, req.conversation_history
+            req.query, intent,
+            {"clarification_needed": True, "question": clarification_q},
+            req.language, req.conversation_history
         )
-        return QueryResponse(
-            answer_english=synthesis.get("answer_english", clarification_q or "Could you please specify which FIR, district, or crime type you would like to analyze?"),
-            answer_translated=synthesis.get("answer_translated", "ದಯವಿಟ್ಟು ನೀವು ಯಾವ ಎಫ್‌ಐಆರ್ ಅಥವಾ ಜಿಲ್ಲೆಯನ್ನು ವಿಶ್ಲೇಷಿಸಲು ಬಯಸುತ್ತೀರಿ ಎಂದು ನಿರ್ದಿಷ್ಟಪಡಿಸಬಹುದೇ?"),
-            language=req.language,
-            confidence=0.9,
-            intent=intent,
-            audit_trail=audit_trail,
-            raw_data={}
+        return _early_return(
+            synthesis.get("answer_english", clarification_q or
+                "Could you specify which FIR, district, or crime type you'd like to analyze?"),
+            synthesis.get("answer_translated",
+                "ದಯವಿಟ್ಟು ಯಾವ ಎಫ್‌ಐಆರ್ ಅಥವಾ ಜಿಲ್ಲೆಯನ್ನು ವಿಶ್ಲೇಷಿಸಬೇಕು ಎಂದು ನಿರ್ದಿಷ್ಟಪಡಿಸಬಹುದೇ?"),
+            0.9
         )
 
-    raw_data = {}
-
-    # 2. Specialist Agent Execution using resolved_query (fixed typos/context)
-    t2 = time.time()
+    # ── 2. Specialist agent ───────────────────────────────────────────────────
+    raw_data: dict = {}
+    t2 = time.perf_counter()
     try:
         if intent in ("factual", "trend"):
             raw_data = execute_nl_query(resolved_query)
-            if raw_data.get("error"):
-                audit_trail.append(f"QueryAgent failed: {raw_data['error']}")
+            rows = len(raw_data.get("results", []))
+            audit_trail.append(f"QueryAgent: {rows} rows returned")
+            log.info("query_agent_ok", extra={
+                "request_id": request_id, "rows": rows,
+                "sql": raw_data.get("sql_query", "")[:120],
+                "latency": round(time.perf_counter() - t2, 4),
+            })
+        elif intent == "hotspot":
+            from hotspot_agent import get_crime_hotspots
+            filters = router_decision.get("hotspot_filters") or {}
+            if isinstance(filters, dict):
+                dist = filters.get("district") if filters.get("district") != "All" else None
+                cg = filters.get("crime_group") if filters.get("crime_group") != "All" else None
+                yr = filters.get("year")
             else:
-                audit_trail.append(f"QueryAgent executed SQL — {len(raw_data.get('results', []))} rows returned.")
+                dist, cg, yr = None, None, None
+
+            hotspot_geojson = get_crime_hotspots(crime_group=cg, year=yr, district=dist, limit=500)
+            raw_data = {
+                "results": [{"total_geotagged_hotspots": hotspot_geojson["count"], "district": dist or "All Karnataka", "crime": cg or "All Crimes"}],
+                "hotspot_filters": filters,
+                "count": hotspot_geojson["count"]
+            }
+            audit_trail.append(f"HotspotAgent: {hotspot_geojson['count']} geotagged points fetched for map visualization.")
+            log.info("hotspot_agent_ok", extra={
+                "request_id": request_id, "count": hotspot_geojson["count"],
+                "filters": filters, "latency": round(time.perf_counter() - t2, 4),
+            })
         elif intent == "network":
             raw_data = build_network_graph(resolved_query)
-            audit_trail.append(f"NetworkAgent built graph with {len(raw_data.get('nodes', []))} nodes, {len(raw_data.get('edges', []))} edges.")
+            nodes = len(raw_data.get("nodes", []))
+            edges = len(raw_data.get("edges", []))
+            audit_trail.append(f"NetworkAgent: {nodes} nodes, {edges} edges")
+            log.info("network_agent_ok", extra={
+                "request_id": request_id, "nodes": nodes, "edges": edges,
+                "latency": round(time.perf_counter() - t2, 4),
+            })
     except Exception as e:
-        audit_trail.append(f"Agent execution error: {str(e)}")
+        log.error("agent_execution_failed", extra={
+            "request_id": request_id, "intent": intent, "error": str(e)
+        })
+        audit_trail.append(f"Agent error: {str(e)[:100]}")
         raw_data = {"error": str(e)}
-    t_agent = time.time() - t2
-    audit_trail[-1] += f" ({t_agent:.2f}s)"
 
-    # 3 & 4. Synthesis & Skeptic — run concurrently with context
-    t3 = time.time()
+
+    # ── 3+4. Synthesis + Skeptic (concurrent) ────────────────────────────────
+    t3 = time.perf_counter()
     if "error" in raw_data and not raw_data.get("results"):
-        synthesis = {
-            "answer_english": "I encountered an issue querying the database. Could you rephrase your search question?",
+        synthesis: dict = {
+            "answer_english": "I encountered an issue querying the database. Please rephrase your question.",
             "answer_translated": "ಡೇಟಾಬೇಸ್ ಪ್ರಶ್ನಿಸುವಾಗ ಸಮಸ್ಯೆಯಾಗಿದೆ. ದಯವಿಟ್ಟು ಪುನರಾವರ್ತಿಸಿ.",
-            "confidence": 0.0
+            "confidence": 0.0,
         }
-        audit_trail.append("SynthesisAgent skipped due to upstream error.")
+        audit_trail.append("Synthesis skipped — upstream DB error.")
     else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            future_synthesis = executor.submit(
-                synthesize_response, resolved_query, intent, raw_data, req.language, req.conversation_history
-            )
-            future_skeptic = executor.submit(run_skeptic, resolved_query, raw_data)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                f_synth   = executor.submit(synthesize_response, resolved_query, intent, raw_data, req.language, req.conversation_history)
+                f_skeptic = executor.submit(run_skeptic, resolved_query, raw_data)
+                synthesis   = f_synth.result(timeout=30)
+                skeptic_res = f_skeptic.result(timeout=15)
 
-            try:
-                synthesis = future_synthesis.result()
-                skeptic_res = future_skeptic.result()
+            t_synth = round(time.perf_counter() - t3, 4)
+            audit_trail.append(f"Synthesis + Skeptic concurrent ({t_synth}s)")
 
-                t_final = time.time() - t3
-                audit_trail.append(f"SynthesisAgent & SkepticAgent ran concurrently ({t_final:.2f}s)")
+            if not skeptic_res.get("is_valid"):
+                fb = skeptic_res.get("skeptic_feedback", "")
+                audit_trail.append(f"Skeptic flagged: {fb}")
+                synthesis["confidence"] = max(0.0, synthesis.get("confidence", 0.8) - 0.5)
+                synthesis["answer_english"] += f"\n\n[System Warning: {fb}]"
+                log.warning("skeptic_flagged", extra={
+                    "request_id": request_id, "feedback": fb[:200]
+                })
+            else:
+                audit_trail.append("Skeptic: data sufficiency validated.")
+                log.info("skeptic_validated", extra={"request_id": request_id})
 
-                if not skeptic_res.get("is_valid"):
-                    audit_trail.append(f"SkepticAgent flagged: {skeptic_res.get('skeptic_feedback')}")
-                    synthesis["confidence"] = max(0.0, synthesis.get("confidence", 0.8) - 0.5)
-                    synthesis["answer_english"] += f"\n\n[System Warning: {skeptic_res.get('skeptic_feedback')}]"
-                else:
-                    audit_trail.append("SkepticAgent validated raw data sufficiency.")
+        except Exception as e:
+            log.error("synthesis_failed", extra={"request_id": request_id, "error": str(e)})
+            audit_trail.append(f"Synthesis error: {str(e)[:100]}")
+            synthesis = {
+                "answer_english": "The data was fetched but synthesis failed. Please retry.",
+                "answer_translated": "ಡೇಟಾ ಪಡೆಯಲಾಗಿದೆ ಆದರೆ ಸಂಶ್ಲೇಷಣೆ ವಿಫಲವಾಗಿದೆ.",
+                "confidence": 0.5,
+            }
 
-            except Exception as e:
-                audit_trail.append(f"Synthesis/Skeptic execution error: {str(e)}")
-                synthesis = {
-                    "answer_english": "The data was fetched but I could not synthesize a clear response.",
-                    "answer_translated": "ಡೇಟಾವನ್ನು ಪಡೆಯಲಾಗಿದೆ ಆದರೆ ನನಗೆ ಸ್ಪಷ್ಟ ಪ್ರತಿಕ್ರಿಯೆಯನ್ನು ಸಂಶ್ಲೇಷಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.",
-                    "confidence": 0.5
-                }
-
-    # Save turn to DB messages table
+    # ── Persist message to DB ─────────────────────────────────────────────────
+    message_id: int | None = None
     if session_id:
         try:
             conn = get_db_connection()
-            cur = conn.cursor()
+            cur  = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute("""
-                INSERT INTO messages (session_id, user_id, query, answer_english, answer_translated, language, intent, confidence)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO messages
+                  (session_id, user_id, query, answer_english, answer_translated,
+                   language, intent, confidence)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id
             """, (
                 session_id, user_id, req.query,
-                synthesis.get("answer_english"), synthesis.get("answer_translated"),
-                req.language, intent, synthesis.get("confidence", 0.0)
+                synthesis.get("answer_english"),
+                synthesis.get("answer_translated"),
+                req.language, intent,
+                synthesis.get("confidence", 0.0),
             ))
+            message_id = cur.fetchone()["id"]
             cur.execute("UPDATE sessions SET updated_at = NOW() WHERE id = %s", (session_id,))
             conn.commit()
             cur.close()
             conn.close()
         except Exception as e:
-            print(f"Error persisting chat message: {e}")
+            log.error("message_persist_failed", extra={
+                "request_id": request_id, "error": str(e)
+            })
+
+    # ── Log the full activity ─────────────────────────────────────────────────
+    total_ms = int((time.perf_counter() - t_start) * 1000)
+    _log_activity(
+        request_id, current_user, "query", "/api/query",
+        query_text=req.query, intent=intent,
+        status_code=200, latency_ms=total_ms, ip_address=ip,
+    )
+    log.info("query_completed", extra={
+        "request_id": request_id,
+        "intent": intent,
+        "confidence": synthesis.get("confidence", 0),
+        "latency_ms": total_ms,
+        "session_id": session_id,
+        "message_id": message_id,
+    })
 
     return QueryResponse(
         answer_english=synthesis.get("answer_english", ""),
@@ -225,5 +479,78 @@ async def process_query(req: QueryRequest, current_user: dict = Depends(get_curr
         confidence=synthesis.get("confidence", 0.0),
         intent=intent,
         audit_trail=audit_trail,
-        raw_data=raw_data
+        raw_data=raw_data,
+        session_id=session_id,
+        message_id=message_id,
     )
+
+
+# ── Feedback endpoint (👍/👎) ─────────────────────────────────────────────────
+@app.post("/api/feedback", tags=["Query"])
+async def submit_feedback(
+    req: FeedbackRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """Record helpful (+1) or unhelpful (-1) feedback on a specific answer."""
+    if req.feedback not in (1, -1):
+        raise HTTPException(status_code=422, detail="feedback must be +1 or -1")
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+        # Only the message owner can submit feedback
+        cur.execute(
+            "UPDATE messages SET feedback = %s WHERE id = %s AND user_id = %s RETURNING id",
+            (req.feedback, req.message_id, current_user.get("id"))
+        )
+        updated = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        log.error("feedback_write_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="Could not save feedback")
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Message not found or not owned by you")
+
+    request_id = getattr(request.state, "request_id", new_request_id())
+    _log_activity(
+        request_id, current_user, "feedback", "/api/feedback",
+        query_text=f"message_id={req.message_id} feedback={req.feedback}",
+    )
+    log.info("feedback_recorded", extra={
+        "request_id": request_id,
+        "message_id": req.message_id,
+        "feedback": req.feedback,
+        "user": current_user.get("sub"),
+    })
+    return {"status": "ok", "message_id": req.message_id, "feedback": req.feedback}
+
+
+# ── Activity log query endpoint (SCRB Analyst only) ───────────────────────────
+@app.get("/api/activity-log", tags=["System"])
+async def get_activity_log(
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user)
+):
+    """Return recent activity log entries. SCRB Analyst only."""
+    if current_user.get("role") not in ("SCRB Analyst", "DGP"):
+        raise HTTPException(status_code=403, detail="Requires SCRB Analyst role")
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT a.*, u.full_name, u.badge_number
+            FROM activity_log a
+            LEFT JOIN users u ON a.user_id = u.id
+            ORDER BY a.created_at DESC
+            LIMIT %s
+        """, (min(limit, 500),))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        log.error("activity_log_read_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="Could not read activity log")

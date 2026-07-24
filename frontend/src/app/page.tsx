@@ -29,6 +29,17 @@ export default function Home() {
     }
   }, [router]);
 
+  // Auto-switch Investigation Board tab based on AI Query Intent
+  useEffect(() => {
+    if (!activeQueryData) return;
+    if (activeQueryData.intent === "hotspot" || activeQueryData.raw_data?.hotspot_filters) {
+      setActiveTab("hotspots");
+    } else if (activeQueryData.intent === "network") {
+      setActiveTab("network");
+    }
+  }, [activeQueryData]);
+
+
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -151,7 +162,7 @@ export default function Home() {
           {/* Dynamic Panel Content */}
           <div className="flex-1 rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-2xl relative">
             {activeTab === "hotspots" ? (
-              <HotspotMap />
+              <HotspotMap initialFilters={activeQueryData?.raw_data?.hotspot_filters} />
             ) : activeQueryData?.intent === "network" ? (
               <NetworkGraph data={activeQueryData.raw_data} />
             ) : (
@@ -160,11 +171,12 @@ export default function Home() {
                 <p className="text-sm">
                   {activeQueryData?.intent === "factual"
                     ? "Factual query results shown in chat context."
-                    : "Ask a network query or click 'Crime Hotspots Map' to visualize."}
+                    : "Ask a network query, map query, or click 'Crime Hotspots Map' to visualize."}
                 </p>
               </div>
             )}
           </div>
+
         </div>
 
         {/* Right Col: Audit Trail */}

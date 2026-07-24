@@ -61,7 +61,15 @@ function getCrimeColor(crimeGroup: string): string {
   return CRIME_COLORS.DEFAULT;
 }
 
-export default function HotspotMap() {
+interface HotspotMapProps {
+  initialFilters?: {
+    district?: string;
+    crime_group?: string;
+    year?: number | string;
+  };
+}
+
+export default function HotspotMap({ initialFilters }: HotspotMapProps = {}) {
   const [features, setFeatures] = useState<HotspotFeature[]>([]);
   const [crimeGroups, setCrimeGroups] = useState<string[]>([]);
   const [districts, setDistricts] = useState<string[]>([]);
@@ -73,6 +81,21 @@ export default function HotspotMap() {
   const [totalCount, setTotalCount] = useState<number>(0);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+  // Dynamic filter sync from AI query
+  useEffect(() => {
+    if (initialFilters) {
+      if (initialFilters.district && initialFilters.district !== "All") {
+        setSelectedDistrict(initialFilters.district);
+      }
+      if (initialFilters.crime_group && initialFilters.crime_group !== "All") {
+        setSelectedGroup(initialFilters.crime_group);
+      }
+      if (initialFilters.year) {
+        setSelectedYear(String(initialFilters.year));
+      }
+    }
+  }, [initialFilters]);
 
   // Karnataka geographic center and bounds
   // Karnataka bounding box: lat 11.59–18.45, lon 74.05–78.57
@@ -91,6 +114,7 @@ export default function HotspotMap() {
       })
       .catch((err) => console.error("Error fetching hotspot filters:", err));
   }, [API_URL]);
+
 
   const fetchHotspots = useCallback(() => {
     if (!mounted) return;

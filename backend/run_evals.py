@@ -1,6 +1,7 @@
 import json
 import requests
 import time
+from auth import create_access_token
 
 def run_evaluations():
     print("Starting AI Pipeline Evaluation...")
@@ -15,15 +16,39 @@ def run_evaluations():
     for q in queries:
         print(f"Testing Query [{q['id']}]: {q['query']}")
         
-        # Use the specified test role for cross-role RBAC testing
+        role = q.get("test_role", "Inspector")
+        
+        # Map roles to valid database user IDs from the users table
+        role_id_map = {
+            "SCRB Analyst": 1,
+            "Inspector": 2,
+            "Field Officer": 4,
+            "DGP": 1
+        }
+        user_id = role_id_map.get(role, 4)
+        
+        # Create a mock token for this role
+        token_payload = {
+            "sub": f"test_{role.lower().replace(' ', '_')}",
+            "id": user_id,
+            "full_name": f"Test {role}",
+            "role": role,
+            "badge_number": f"BADGE_{role.upper().replace(' ', '_')}",
+            "district": "Bengaluru"
+        }
+        token = create_access_token(token_payload)
+        
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+        
         payload = {
-            "query": q["query"],
-            "role": q.get("test_role", "Inspector")
+            "query": q["query"]
         }
         
         try:
             start_time = time.time()
-            resp = requests.post("http://127.0.0.1:8000/api/query", json=payload, timeout=60)
+            resp = requests.post("http://127.0.0.1:8000/api/query", json=payload, headers=headers, timeout=60)
             latency = time.time() - start_time
             
             if resp.status_code == 200:

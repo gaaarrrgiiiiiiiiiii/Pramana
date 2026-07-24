@@ -206,7 +206,7 @@ RULES:
 Return a JSON with `reasoning`, `intent`, `resolved_query`, and `clarification_question`.
 """
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='models/gemini-2.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -225,3 +225,4 @@ Return a JSON with `reasoning`, `intent`, `resolved_query`, and `clarification_q
     result = _keyword_route(query, conversation_history)
     print(f"[RouterAgent] Keyword Fallback Output: {result}")
     return result
+

@@ -38,7 +38,7 @@ def build_network_graph(user_query: str, limit: int = 30) -> dict:
     try:
         extraction_prompt = f"Extract the main entity (person name, station name, gang name, or crime group) from this query: '{user_query}'"
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='models/gemini-2.5-flash',
             contents=extraction_prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -177,3 +177,4 @@ if __name__ == "__main__":
     import json
     res = build_network_graph("THEFT")
     print(json.dumps(res, indent=2))
+

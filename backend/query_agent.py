@@ -245,7 +245,7 @@ Ensure the query is READ-ONLY (SELECT). Always limit individual row results to 5
 Use ILIKE instead of = for string matching to be case-insensitive.
 """
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='models/gemini-2.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -310,3 +310,4 @@ if __name__ == "__main__":
         print(f"SQL: {res.get('sql_query')}")
         print(f"Explanation: {res.get('explanation')}")
         print(f"Error: {res.get('error')}")
+

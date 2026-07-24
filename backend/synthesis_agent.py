@@ -179,7 +179,7 @@ Instructions:
 Return a JSON matching the requested schema with fields: answer_english, answer_translated, confidence.
 """
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='models/gemini-2.5-flash',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -194,3 +194,4 @@ Return a JSON matching the requested schema with fields: answer_english, answer_
 
     # ── Template-based fallback ───────────────────────────────────────────────
     return _template_synthesis(user_query, intent, raw_data, language)
+

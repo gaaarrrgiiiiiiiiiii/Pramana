@@ -34,7 +34,7 @@ Return a JSON with `is_valid` (boolean) and `skeptic_feedback` (string).
     
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='models/gemini-2.5-flash',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -46,3 +46,4 @@ Return a JSON with `is_valid` (boolean) and `skeptic_feedback` (string).
     except Exception as e:
         print(f"Skeptic error: {e}")
         return {"is_valid": True, "skeptic_feedback": ""} # Default pass on error
+

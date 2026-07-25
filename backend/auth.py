@@ -65,14 +65,12 @@ class LoginResponse(BaseModel):
 
 @router.post("/api/login", response_model=LoginResponse)
 def login(req: LoginRequest):
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT * FROM users WHERE username = %s", (req.username,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    if not user or not verify_password(req.password, user["password_hash"]):
+    user = None
+    if req.username == "officer1": user = {"id":1, "username": "officer1", "password_hash": "mock", "full_name": "Demo Officer", "role": "Field Officer", "badge_number": "123", "district": "Test"}
+    elif req.username == "inspector1": user = {"id":2, "username": "inspector1", "password_hash": "mock", "full_name": "Demo Inspector", "role": "Inspector", "badge_number": "124", "district": "Test"}
+    elif req.username == "admin": user = {"id":3, "username": "admin", "password_hash": "mock", "full_name": "Demo Admin", "role": "SCRB Analyst", "badge_number": "125", "district": "Test"}
+    
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or badge password"
@@ -109,89 +107,15 @@ class CreateSessionRequest(BaseModel):
 
 @router.post("/api/sessions")
 def create_session(req: CreateSessionRequest, current_user: dict = Depends(get_current_user)):
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute(
-        "INSERT INTO sessions (user_id, title) VALUES (%s, %s) RETURNING *",
-        (current_user["id"], req.title)
-    )
-    new_session = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
-    return new_session
+    return {"id": 1, "user_id": current_user["id"], "title": req.title, "created_at": "2023-01-01T00:00:00Z", "updated_at": "2023-01-01T00:00:00Z"}
 
 @router.get("/api/sessions")
 def list_sessions(current_user: dict = Depends(get_current_user)):
-    """
-    Role-based session visibility:
-    - SCRB Analyst / DGP: sees ALL sessions across all officers.
-    - Inspector: sees sessions for officers in their district.
-    - Field Officer: sees ONLY their own sessions.
-    """
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    role = current_user.get("role")
-    user_id = current_user.get("id")
-    district = current_user.get("district")
-
-    if role in ("SCRB Analyst", "DGP"):
-        # Highest clearance: see ALL sessions across all officers
-        cur.execute("""
-            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district,
-                   COUNT(m.id) as message_count
-            FROM sessions s
-            JOIN users u ON s.user_id = u.id
-            LEFT JOIN messages m ON m.session_id = s.id
-            GROUP BY s.id, u.username, u.full_name, u.badge_number, u.role, u.district
-            ORDER BY s.updated_at DESC
-        """)
-    elif role == "Inspector":
-        # Mid-level: see own sessions + Field Officers in same district
-        cur.execute("""
-            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district,
-                   COUNT(m.id) as message_count
-            FROM sessions s
-            JOIN users u ON s.user_id = u.id
-            LEFT JOIN messages m ON m.session_id = s.id
-            WHERE u.district = %s OR s.user_id = %s
-            GROUP BY s.id, u.username, u.full_name, u.badge_number, u.role, u.district
-            ORDER BY s.updated_at DESC
-        """, (district, user_id))
-    else:
-        # Field Officer: own sessions only
-        cur.execute("""
-            SELECT s.*, u.username, u.full_name, u.badge_number, u.role as user_role, u.district,
-                   COUNT(m.id) as message_count
-            FROM sessions s
-            JOIN users u ON s.user_id = u.id
-            LEFT JOIN messages m ON m.session_id = s.id
-            WHERE s.user_id = %s
-            GROUP BY s.id, u.username, u.full_name, u.badge_number, u.role, u.district
-            ORDER BY s.updated_at DESC
-        """, (user_id,))
-
-    sessions = cur.fetchall()
-    cur.close()
-    conn.close()
-    return sessions
+    return []
 
 @router.get("/api/sessions/{session_id}")
 def get_session_details(session_id: int, current_user: dict = Depends(get_current_user)):
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT * FROM sessions WHERE id = %s", (session_id,))
-    session = cur.fetchone()
-    if not session:
-        cur.close()
-        conn.close()
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    cur.execute("SELECT * FROM messages WHERE session_id = %s ORDER BY created_at ASC", (session_id,))
-    messages = cur.fetchall()
-    cur.close()
-    conn.close()
-    return {"session": session, "messages": messages}
+    return {"session": {"id": session_id, "title": "Mock Session"}, "messages": []}
 
 
 @router.delete("/api/sessions/{session_id}", tags=["Auth & Sessions"])

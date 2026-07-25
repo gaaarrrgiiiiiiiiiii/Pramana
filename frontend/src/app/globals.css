@@ -1,8 +1,29 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #050a0e;
+  --foreground: #e0e7ef;
+  --accent-green: #00ff88;
+  --accent-green-dim: #00cc6a;
+  --accent-emerald: #10b981;
+  --accent-blue: #3b82f6;
+  --surface-1: #0a1018;
+  --surface-2: #0f1923;
+  --surface-3: #152233;
+  --border: #1e3a50;
+  --border-glow: rgba(0, 255, 136, 0.15);
+  --text-primary: #e0e7ef;
+  --text-secondary: #8ba3be;
+  --text-muted: #4a6580;
+  --glow-green: 0 0 30px rgba(0, 255, 136, 0.15), 0 0 60px rgba(0, 255, 136, 0.05);
+  --glow-blue: 0 0 30px rgba(59, 130, 246, 0.15), 0 0 60px rgba(59, 130, 246, 0.05);
+
+  /* HUD Theme Colors */
+  --hud-bg: #030b16;
+  --hud-panel-bg: rgba(6, 17, 33, 0.7);
+  --hud-border: #1a3c5a;
+  --hud-accent: #00f0ff;
+  --hud-accent-glow: 0 0 10px rgba(0, 240, 255, 0.5), 0 0 20px rgba(0, 240, 255, 0.3);
 }
 
 @theme inline {
@@ -12,15 +33,563 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* ── Base ─────────────────────────────────────────── */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans, 'Inter', -apple-system, BlinkMacSystemFont, sans-serif);
+  overflow-x: hidden;
+}
+
+/* ── Custom Scrollbar ─────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface-1);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ── Selection ────────────────────────────────────── */
+::selection {
+  background: rgba(0, 255, 136, 0.2);
+  color: #fff;
+}
+
+/* ── Animations ───────────────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@keyframes slide-up {
+  0% { opacity: 0; transform: translateY(30px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-down {
+  0% { opacity: 0; transform: translateY(-20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(0, 255, 136, 0.15); }
+  50% { border-color: rgba(0, 255, 136, 0.4); }
+}
+
+@keyframes scan-line {
+  0% { top: -2px; }
+  100% { top: 100%; }
+}
+
+@keyframes typing-dots {
+  0%, 20% { opacity: 0.2; }
+  50% { opacity: 1; }
+  80%, 100% { opacity: 0.2; }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.7s ease-out forwards;
+}
+
+.animate-slide-down {
+  animation: slide-down 0.5s ease-out forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out forwards;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 255, 136, 0.05) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s linear infinite;
+}
+
+.animate-border-glow {
+  animation: border-glow 3s ease-in-out infinite;
+}
+
+@keyframes spin-earth {
+  0% { background-position: 0px center; }
+  100% { background-position: 1000px center; }
+}
+
+.animate-spin-earth {
+  animation: spin-earth 40s linear infinite;
+}
+
+/* ── Glassmorphism Utility ────────────────────────── */
+.glass {
+  background: rgba(10, 16, 24, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 255, 136, 0.08);
+}
+
+.glass-strong {
+  background: rgba(10, 16, 24, 0.85);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border: 1px solid rgba(0, 255, 136, 0.12);
+}
+
+/* ── Glow Effects ─────────────────────────────────── */
+.glow-green {
+  box-shadow: var(--glow-green);
+}
+
+.glow-green-strong {
+  box-shadow: var(--glow-green-strong);
+}
+
+.glow-blue {
+  box-shadow: var(--glow-blue);
+}
+
+.text-glow-green {
+  text-shadow: 0 0 20px rgba(0, 255, 136, 0.5), 0 0 40px rgba(0, 255, 136, 0.2);
+}
+
+.text-glow-blue {
+  text-shadow: 0 0 20px rgba(59, 130, 246, 0.5), 0 0 40px rgba(59, 130, 246, 0.2);
+}
+
+/* ── Gradient Text ────────────────────────────────── */
+.gradient-text-green {
+  background: linear-gradient(135deg, #00ff88, #00cc6a, #10b981);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-blue {
+  background: linear-gradient(135deg, #3b82f6, #60a5fa, #93c5fd);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Noise Texture Overlay ────────────────────────── */
+.noise::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Scan-line Effect ─────────────────────────────── */
+.scan-line::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.1), transparent);
+  animation: scan-line 8s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ══════════════════════════════════════════════════════
+   TACTICAL MAP & DASHBOARD ANIMATIONS
+   ══════════════════════════════════════════════════════ */
+
+/* ── Radar Sweep ──────────────────────────────────── */
+@keyframes radar-sweep {
+  0% { transform: translate(-50%, -50%) rotate(0deg); }
+  100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.radar-sweep {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 15;
+  animation: radar-sweep 8s linear infinite;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 340deg,
+    rgba(0, 255, 136, 0.06) 350deg,
+    rgba(0, 255, 136, 0.12) 358deg,
+    transparent 360deg
+  );
+}
+
+/* ── Sonar Pulse Rings ────────────────────────────── */
+@keyframes sonar-expand {
+  0% {
+    transform: translate(-50%, -50%) scale(0.1);
+    opacity: 0.6;
+    border-color: rgba(0, 255, 136, 0.4);
+  }
+  60% { opacity: 0.15; }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+    border-color: rgba(0, 255, 136, 0);
+  }
+}
+
+.sonar-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 700px;
+  height: 700px;
+  border: 1px solid rgba(0, 255, 136, 0.3);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 14;
+  animation: sonar-expand 5s ease-out infinite;
+}
+.sonar-ring:nth-child(2) { animation-delay: 1.6s; }
+.sonar-ring:nth-child(3) { animation-delay: 3.2s; }
+
+/* ── Marker Pulse (for map pins) ──────────────────── */
+@keyframes marker-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.5);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 15px 5px rgba(0, 255, 136, 0.2);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(0, 255, 136, 0);
+  }
+}
+
+@keyframes marker-pulse-red {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 15px 8px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes marker-pulse-amber {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 15px 8px rgba(245, 158, 11, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+
+/* ── Data Stream (vertical lines) ─────────────────── */
+@keyframes data-stream {
+  0% { transform: translateY(-100%); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+/* ── Grid Pulse ───────────────────────────────────── */
+@keyframes grid-pulse {
+  0%, 100% { opacity: 0.05; }
+  50% { opacity: 0.15; }
+}
+
+.grid-animated {
+  animation: grid-pulse 6s ease-in-out infinite;
+}
+
+/* ── HUD Corner Brackets ──────────────────────────── */
+.hud-corner {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  z-index: 20;
+}
+.hud-corner--tl {
+  top: -1px; left: -1px;
+  border-top: 2px solid var(--hud-accent, #00ff88);
+  border-left: 2px solid var(--hud-accent, #00ff88);
+}
+.hud-corner--tr {
+  top: -1px; right: -1px;
+  border-top: 2px solid var(--hud-accent, #00ff88);
+  border-right: 2px solid var(--hud-accent, #00ff88);
+}
+.hud-corner--bl {
+  bottom: -1px; left: -1px;
+  border-bottom: 2px solid var(--hud-accent, #00ff88);
+  border-left: 2px solid var(--hud-accent, #00ff88);
+}
+.hud-corner--br {
+  bottom: -1px; right: -1px;
+  border-bottom: 2px solid var(--hud-accent, #00ff88);
+  border-right: 2px solid var(--hud-accent, #00ff88);
+}
+
+/* ── HUD Panel Styles (Blue Theme) ── */
+.hud-panel {
+  background: var(--hud-panel-bg);
+  border: 1px solid var(--hud-border);
+  position: relative;
+  backdrop-filter: blur(10px);
+}
+
+.hud-panel-title {
+  background: linear-gradient(90deg, rgba(0, 240, 255, 0.15) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(0, 240, 255, 0.4);
+  border-top: 1px solid rgba(0, 240, 255, 0.1);
+  color: var(--hud-accent);
+  text-shadow: 0 0 5px rgba(0, 240, 255, 0.5);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+}
+
+.hud-bg-grid {
+  background-color: var(--hud-bg);
+  background-image: 
+    linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Status Blink ─────────────────────────────────── */
+@keyframes status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.status-live {
+  animation: status-blink 2s ease-in-out infinite;
+}
+
+/* ── Glow Line (horizontal) ───────────────────────── */
+@keyframes glow-line-sweep {
+  0% { left: -30%; }
+  100% { left: 130%; }
+}
+
+.glow-line-sweep::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.15), transparent);
+  animation: glow-line-sweep 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── Network Node Glow ────────────────────────────── */
+@keyframes node-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(0, 255, 136, 0.3));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(0, 255, 136, 0.6));
+  }
+}
+
+/* ── Loading Skeleton ─────────────────────────────── */
+@keyframes skeleton-loading {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #0f1923 25%, #152233 50%, #0f1923 75%);
+  background-size: 200px 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+}
+
+/* ── Counting Animation ───────────────────────────── */
+@keyframes count-up-flash {
+  0% { color: #00ff88; text-shadow: 0 0 10px rgba(0, 255, 136, 0.5); }
+  100% { color: inherit; text-shadow: none; }
+}
+
+/* ── Leaflet Map Overrides (Tactical Neon) ─────────── */
+.leaflet-container {
+  background: #050a0e !important;
+}
+
+/* Ensure custom markers aren't clipped or given default white backgrounds */
+.leaflet-marker-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* ── Tactical 3D Map Pin ── */
+.tactical-pin-container {
+  width: 0;
+  height: 0;
+  position: relative;
+  overflow: visible !important;
+}
+
+.tactical-pin {
+  width: 28px;
+  height: 28px;
+  border-radius: 50% 50% 50% 0;
+  position: absolute;
+  transform: rotate(-45deg);
+  left: -14px;
+  top: -32px;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Shadow for the 3D depth and neon glow */
+  box-shadow: -3px 3px 10px rgba(0,0,0,0.6), inset 0 0 10px rgba(0,0,0,0.3);
+}
+
+.tactical-pin::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(255,255,255,0.8), inset 0 0 4px rgba(0,0,0,0.5);
+}
+
+/* Pulse effect specific for the pin */
+@keyframes pin-pulse {
+  0% { box-shadow: 0 0 0 0 var(--pin-color); }
+  70% { box-shadow: 0 0 20px 10px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.tactical-pin-glow {
+  position: absolute;
+  width: 12px;
+  height: 4px;
+  background: var(--pin-color);
+  border-radius: 50%;
+  left: -6px;
+  top: -2px;
+  filter: blur(2px);
+  animation: pin-pulse 2s infinite;
+}
+
+/* ── Tactical Map Network Lines ── */
+.tactical-polyline {
+  filter: drop-shadow(0 0 8px #00f0ff);
+  stroke-dasharray: 12 12;
+  animation: dash-flow 20s linear infinite;
+}
+
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -1000;
+  }
+}
+
+.neon-marker {
+  filter: drop-shadow(0 0 8px currentColor) drop-shadow(0 0 12px currentColor);
+  animation: marker-pulse 2s ease-in-out infinite;
+}
+
+.leaflet-tile-pane {
+  filter: sepia(1) hue-rotate(180deg) brightness(0.7) contrast(1.8) saturate(3) !important;
+  opacity: 0.8;
+}
+
+.leaflet-control-zoom a {
+  background: #0a1018 !important;
+  border-color: #1e3a50 !important;
+  color: #00ff88 !important;
+}
+.leaflet-control-zoom a:hover {
+  background: #0f1923 !important;
+  border-color: rgba(0, 255, 136, 0.3) !important;
+}
+
+.leaflet-control-attribution {
+  background: rgba(10, 16, 24, 0.8) !important;
+  color: #4a6580 !important;
+  font-size: 9px !important;
+}
+.leaflet-control-attribution a {
+  color: #00ff88 !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #0a1018 !important;
+  border: 1px solid rgba(0, 255, 136, 0.2) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.1), 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+  color: #e0e7ef !important;
+}
+
+.leaflet-popup-tip {
+  background: #0a1018 !important;
+  border: 1px solid rgba(0, 255, 136, 0.2) !important;
+  box-shadow: none !important;
+}
+
+.leaflet-popup-close-button {
+  color: #4a6580 !important;
+}
+.leaflet-popup-close-button:hover {
+  color: #00ff88 !important;
+}
+
+/* ── Cytoscape Overrides ──────────────────────────── */
+.cytoscape-container canvas {
+  filter: saturate(1.2) contrast(1.1);
 }

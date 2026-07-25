@@ -22,13 +22,12 @@ interface LanguageSelectorProps {
 export default function LanguageSelector({ currentLanguage, onLanguageChange }: LanguageSelectorProps) {
   const current = SUPPORTED_LANGUAGES.find(l => l.code === currentLanguage);
   return (
-    <div className="flex items-center space-x-2 bg-slate-800 p-2 rounded-md">
-      <Languages className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-      <span className="text-sm text-slate-300 font-medium whitespace-nowrap">Translate:</span>
+    <div className="flex items-center space-x-2 bg-[#0f1923] border border-[#1e3a50] p-2 rounded-xl">
+      <Languages className="w-4 h-4 text-[#00ff88] flex-shrink-0" />
       <select
         value={currentLanguage}
         onChange={(e) => onLanguageChange(e.target.value)}
-        className="bg-slate-700 text-white text-sm rounded px-2 py-1 outline-none border border-slate-600 focus:border-emerald-500 transition-colors"
+        className="bg-[#0a1018] text-[#e0e7ef] text-xs rounded-lg px-2 py-1 outline-none border border-[#152233] focus:border-[#00ff88] transition-colors cursor-pointer"
       >
         {SUPPORTED_LANGUAGES.map(l => (
           <option key={l.code} value={l.code}>

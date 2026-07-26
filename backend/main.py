@@ -42,33 +42,23 @@ app = FastAPI(title="Pramana — Karnataka Police Investigative Co-Pilot", versi
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-@app.middleware("http")
-async def custom_cors_middleware(request: Request, call_next):
-    origin = request.headers.get("origin", "*")
-    if request.method == "OPTIONS":
-        response = Response(status_code=200)
-        response.headers["Access-Control-Allow-Origin"] = origin if origin != "*" else "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        return response
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = origin if origin != "*" else "*"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
+frontend_url = os.environ.get("FRONTEND_URL", "")
+allowed_origins = [
+    "https://pramana-ui-sshxrzdq.onslate.in",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
+if frontend_url and frontend_url not in allowed_origins:
+    allowed_origins.append(frontend_url)
 
-@app.options("/{full_path:path}", tags=["System"])
-async def options_route_handler(request: Request, full_path: str):
-    origin = request.headers.get("origin", "*")
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": origin if origin != "*" else "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept",
-            "Access-Control-Allow-Credentials": "true",
-        }
-    )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_origin_regex=r".*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Router Registrations ──────────────────────────────────────────────────────
 app.include_router(auth_router)

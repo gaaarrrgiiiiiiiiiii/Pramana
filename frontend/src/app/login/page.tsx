@@ -29,54 +29,68 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
+    const API_URL =
+      process.env.NEXT_PUBLIC_API_URL ||
+      "https://pramana-api-50044352049.development.catalystappsail.in";
+
+    const formBody = new URLSearchParams();
+    formBody.append("username", username.trim());
+    formBody.append("password", password);
+
+    let access_token = "";
+    let user = null;
+    let lastError = "";
+
+    // Strategy 1: form-urlencoded direct to backend (simple request = no CORS preflight)
     try {
-      let access_token = "";
-      let user = null;
-
-      try {
-        const res = await axios.post(`/api/proxy/api/login`, {
-          username: username.trim(),
-          password: password,
-        });
-        access_token = res.data.access_token;
-        user = res.data.user;
-      } catch (axiosErr: any) {
-        // Fallback: form-urlencoded (also goes through proxy, no CORS)
-        const params = new URLSearchParams();
-        params.append("username", username.trim());
-        params.append("password", password);
-
-        const fetchRes = await fetch(`/api/proxy/api/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: params.toString(),
-        });
-        if (!fetchRes.ok) {
-          throw axiosErr;
-        }
-        const data = await fetchRes.json();
+      const res = await fetch(`${API_URL}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formBody.toString(),
+      });
+      const data = await res.json();
+      if (res.ok && data.access_token) {
         access_token = data.access_token;
         user = data.user;
+      } else {
+        lastError = data.detail || "Authentication failed.";
       }
-
-      if (access_token && user) {
-        localStorage.setItem("token", access_token);
-        localStorage.setItem("user", JSON.stringify(user));
-        router.push("/dashboard");
-      }
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      const errorText = typeof detail === "string"
-        ? detail
-        : Array.isArray(detail)
-        ? detail.map((d: any) => d.msg || d.type || JSON.stringify(d)).join("; ")
-        : typeof detail === "object" && detail !== null
-        ? JSON.stringify(detail)
-        : "Authentication failed. Check your badge credentials.";
-      setError(errorText);
-    } finally {
-      setLoading(false);
+    } catch (e1: any) {
+      lastError = e1.message || "Network error reaching backend.";
     }
+
+    // Strategy 2: JSON through proxy (works when SSR proxy is deployed)
+    if (!access_token) {
+      try {
+        const res2 = await fetch(`/api/proxy/api/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: username.trim(), password }),
+        });
+        const data2 = await res2.json();
+        if (res2.ok && data2.access_token) {
+          access_token = data2.access_token;
+          user = data2.user;
+        } else {
+          lastError = data2.detail || lastError;
+        }
+      } catch {
+        // proxy not available in static mode — that's fine, strategy 1 should have worked
+      }
+    }
+
+    if (access_token && user) {
+      localStorage.setItem("token", access_token);
+      localStorage.setItem("user", JSON.stringify(user));
+      router.push("/dashboard");
+    } else {
+      const detail = typeof lastError === "string" && lastError
+        ? lastError
+        : "Authentication failed. Check your badge credentials.";
+      setError(detail);
+    }
+
+    setLoading(false);
   };
 
   const handleQuickLogin = (user: string, pass: string) => {

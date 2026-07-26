@@ -8,7 +8,7 @@ if os.path.isdir(_lib):
 import time
 import uuid
 import concurrent.futures
-from fastapi import FastAPI, Depends, Header, Request, HTTPException
+from fastapi import FastAPI, Depends, Header, Request, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -59,6 +59,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.options("/{full_path:path}", tags=["System"])
+async def options_route_handler(request: Request, full_path: str):
+    origin = request.headers.get("origin", "*")
+    req_headers = request.headers.get("access-control-request-headers", "*")
+    req_method = request.headers.get("access-control-request-method", "GET, POST, PUT, DELETE, OPTIONS")
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": origin if origin != "*" else "*",
+            "Access-Control-Allow-Methods": req_method if req_method else "*",
+            "Access-Control-Allow-Headers": req_headers if req_headers else "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
 
 # ── Router Registrations ──────────────────────────────────────────────────────
 app.include_router(auth_router)

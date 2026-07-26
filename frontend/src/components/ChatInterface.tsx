@@ -300,43 +300,100 @@ export default function ChatInterface({
 
     try {
       const token = localStorage.getItem("token") || "";
+      const API_URL =
+        process.env.NEXT_PUBLIC_API_URL ||
+        "https://pramana-api-50044352049.development.catalystappsail.in";
 
-      const res = await axios.post(
-        `${PROXY}/api/proxy/api/query?token=${token}`,
-        {
-          query: currentQuery,
-          language: language,
-          session_id: sessionId,
-          conversation_history: history,
-          token: token,
-        },
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-      );
+      let data: any = null;
 
-      const data = res.data;
-      onQueryComplete(data);
-
-      if (data.session_id && !sessionId) {
-        setSessionId(data.session_id);
-        if (onSessionChange) onSessionChange(data.session_id);
+      // Strategy 1: Try SSR Proxy
+      try {
+        const proxyRes = await axios.post(
+          `/api/proxy/api/query?token=${token}`,
+          {
+            query: currentQuery,
+            language: language,
+            session_id: sessionId,
+            conversation_history: history,
+            token: token,
+          },
+          { headers: token ? { Authorization: `Bearer ${token}` } : {}, timeout: 10000 }
+        );
+        if (proxyRes.data && proxyRes.data.answer_english) {
+          data = proxyRes.data;
+        }
+      } catch {
+        // Proxy not available or failed — fall through to direct Strategy 2
       }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "agent",
-          text: data.answer_english,
-          translated: data.answer_translated,
-          language: data.language,
-          messageId: data.message_id ?? undefined,
-          feedback: null,
-        },
-      ]);
+      // Strategy 2: Direct backend URL with form-urlencoded (simple request = no CORS preflight)
+      if (!data) {
+        const formParams = new URLSearchParams();
+        formParams.append("query", currentQuery);
+        formParams.append("language", language);
+        if (sessionId) formParams.append("session_id", String(sessionId));
+        if (token) formParams.append("token", token);
+        if (history.length > 0) formParams.append("conversation_history", JSON.stringify(history));
 
-      setHistory((prev) => [
-        ...prev.slice(-4),
-        { query: currentQuery, answer_english: data.answer_english },
-      ]);
+        const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: formParams.toString(),
+        });
+        if (directRes.ok) {
+          const json = await directRes.json();
+          if (json && (json.answer_english || json.detail)) {
+            data = json;
+          }
+        }
+      }
+
+      // Strategy 3: Direct backend with JSON fallback
+      if (!data) {
+        const jsonRes = await fetch(`${API_URL}/api/query?token=${token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: currentQuery,
+            language: language,
+            session_id: sessionId,
+            conversation_history: history,
+          }),
+        });
+        if (jsonRes.ok) {
+          data = await jsonRes.json();
+        }
+      }
+
+      if (data && data.answer_english) {
+        onQueryComplete(data);
+
+        if (data.session_id && !sessionId) {
+          setSessionId(data.session_id);
+          if (onSessionChange) onSessionChange(data.session_id);
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "agent",
+            text: data.answer_english,
+            translated: data.answer_translated || "",
+            language: data.language || language,
+            messageId: data.message_id ?? undefined,
+            feedback: null,
+          },
+        ]);
+
+        setHistory((prev) => [
+          ...prev.slice(-4),
+          { query: currentQuery, answer_english: data.answer_english },
+        ]);
+      } else {
+        const errMsg = data?.detail || "Could not retrieve query response. Please check backend status.";
+        setMessages((prev) => [...prev, { role: "agent", text: errMsg }]);
+        onQueryComplete(null);
+      }
     } catch (err: any) {
       if (err.response?.status === 401) {
         window.location.href = "/login";
@@ -350,7 +407,7 @@ export default function ChatInterface({
           ? detail.map((d: any) => d.msg || d.type || JSON.stringify(d)).join("; ")
           : typeof detail === "object" && detail !== null
           ? JSON.stringify(detail)
-          : "Network Error: Could not reach backend.";
+          : "Network Error: Could not reach backend server.";
 
       setMessages((prev) => [...prev, { role: "agent", text: errorText }]);
       onQueryComplete(null);

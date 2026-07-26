@@ -222,12 +222,45 @@ ROLE_RATE_LIMITS = {
 }
 
 @app.post("/api/query", response_model=QueryResponse, tags=["Query"])
-@limiter.limit("60/minute")   # global safety net; per-role checked below
+@limiter.limit("60/minute")
 async def process_query(
-    req: QueryRequest,
     request: Request,
+    req: QueryRequest = None,
     current_user: dict = Depends(get_current_user)
 ):
+    if req is None or not req.query:
+        q_text = ""
+        q_lang = "English"
+        q_sid = None
+        q_hist = []
+        try:
+            body = await request.json()
+            q_text = body.get("query", "")
+            q_lang = body.get("language", "English")
+            q_sid = body.get("session_id")
+            q_hist = body.get("conversation_history", [])
+        except Exception:
+            try:
+                form = await request.form()
+                q_text = str(form.get("query", ""))
+                q_lang = str(form.get("language", "English"))
+                if form.get("session_id"):
+                    q_sid = int(form.get("session_id"))
+                if form.get("conversation_history"):
+                    import json
+                    q_hist = json.loads(form.get("conversation_history"))
+            except Exception:
+                pass
+        if not q_text:
+            q_text = request.query_params.get("query", "")
+            q_lang = request.query_params.get("language", "English")
+        req = QueryRequest(
+            query=q_text,
+            language=q_lang,
+            session_id=q_sid,
+            conversation_history=q_hist
+        )
+
     t_start = time.perf_counter()
     request_id = getattr(request.state, "request_id", new_request_id())
     audit_trail: list[str] = []

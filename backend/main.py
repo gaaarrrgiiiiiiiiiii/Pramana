@@ -7,6 +7,8 @@ if os.path.isdir(_lib):
 
 import time
 import uuid
+import json
+import urllib.parse
 import concurrent.futures
 from fastapi import FastAPI, Depends, Header, Request, HTTPException, Response
 from fastapi.responses import JSONResponse
@@ -272,40 +274,47 @@ async def process_query(
     current_user: dict = Depends(get_current_user)
 ):
     req = None
-    content_type = request.headers.get("content-type", "").lower()
     q_text = ""
     q_lang = "English"
     q_sid = None
     q_hist = []
 
-    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        try:
-            form = await request.form()
-            q_text = str(form.get("query", "")).strip()
-            q_lang = str(form.get("language", "English"))
-            if form.get("session_id"):
-                try: q_sid = int(form.get("session_id"))
-                except: pass
-            if form.get("conversation_history"):
-                import json
-                try: q_hist = json.loads(form.get("conversation_history"))
-                except: pass
-        except Exception:
-            pass
-    else:
-        try:
-            body = await request.json()
-            if isinstance(body, dict):
-                q_text = str(body.get("query", "")).strip()
-                q_lang = body.get("language", "English")
-                q_sid = body.get("session_id")
-                q_hist = body.get("conversation_history", [])
-        except Exception:
-            pass
+    try:
+        raw_body = await request.body()
+        body_str = raw_body.decode("utf-8", errors="ignore")
+
+        if body_str.startswith("{") or body_str.startswith("["):
+            try:
+                bjson = json.loads(body_str)
+                if isinstance(bjson, dict):
+                    q_text = str(bjson.get("query", "")).strip()
+                    q_lang = str(bjson.get("language", "English"))
+                    q_sid = bjson.get("session_id")
+                    q_hist = bjson.get("conversation_history", [])
+            except Exception:
+                pass
+
+        if not q_text and body_str:
+            try:
+                parsed = urllib.parse.parse_qs(body_str)
+                if "query" in parsed and parsed["query"]:
+                    q_text = str(parsed["query"][0]).strip()
+                if "language" in parsed and parsed["language"]:
+                    q_lang = str(parsed["language"][0])
+                if "session_id" in parsed and parsed["session_id"]:
+                    try: q_sid = int(parsed["session_id"][0])
+                    except: pass
+                if "conversation_history" in parsed and parsed["conversation_history"]:
+                    try: q_hist = json.loads(parsed["conversation_history"][0])
+                    except: pass
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     if not q_text:
-        q_text = request.query_params.get("query", "").strip()
-        q_lang = request.query_params.get("language", "English")
+        q_text = str(request.query_params.get("query", "")).strip()
+        q_lang = str(request.query_params.get("language", "English"))
 
     req = QueryRequest(
         query=q_text,

@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
@@ -70,26 +71,37 @@ class LoginResponse(BaseModel):
 @router.post("/api/login")
 @router.post("/api/auth/login")
 async def login(request: Request):
-    content_type = request.headers.get("content-type", "").lower()
     username = ""
     password = ""
 
-    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        try:
-            form = await request.form()
-            username = str(form.get("username", "")).strip().lower()
-            password = str(form.get("password", ""))
-        except Exception:
-            pass
-    else:
-        try:
-            body = await request.json()
-            if isinstance(body, dict):
-                username = str(body.get("username", "")).strip().lower()
-                password = str(body.get("password", ""))
-        except Exception:
-            pass
+    try:
+        raw_body = await request.body()
+        body_str = raw_body.decode("utf-8", errors="ignore")
+        
+        # 1. Try JSON
+        if body_str.startswith("{") or body_str.startswith("["):
+            try:
+                data = json.loads(body_str)
+                if isinstance(data, dict):
+                    username = str(data.get("username", "")).strip().lower()
+                    password = str(data.get("password", ""))
+            except Exception:
+                pass
 
+        # 2. Try form-urlencoded via standard library urllib.parse
+        if not username and body_str:
+            try:
+                parsed = urllib.parse.parse_qs(body_str)
+                if "username" in parsed and parsed["username"]:
+                    username = str(parsed["username"][0]).strip().lower()
+                if "password" in parsed and parsed["password"]:
+                    password = str(parsed["password"][0])
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 3. Try query parameters as final fallback
     if not username:
         username = str(request.query_params.get("username", "")).strip().lower()
         if not password:

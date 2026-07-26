@@ -1,20 +1,15 @@
 import os
-import psycopg2
+from functools import lru_cache
 from psycopg2.extras import RealDictCursor
 from fastapi import APIRouter, Query
 from dotenv import load_dotenv
+from db import get_db_cursor
 
 load_dotenv()
 router = APIRouter(tags=["Hotspots & Analytics"])
 
-def get_db_connection():
-    return psycopg2.connect(
-        host=os.environ.get("DB_HOST", "127.0.0.1"),
-        port=os.environ.get("DB_PORT", "5555"),
-        dbname=os.environ.get("DB_NAME", "datathon_db"),
-        user=os.environ.get("DB_USER", "datathon_user"),
-        password=os.environ.get("DB_PASSWORD", "datathon_password")
-    )
+# In-memory filter cache
+_FILTER_CACHE = None
 
 @router.get("/api/hotspots")
 def get_crime_hotspots(
@@ -36,16 +31,22 @@ def get_crime_hotspots(
     if hasattr(district, "default"):
         district = district.default
 
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-
     query = """
-        SELECT latitude, longitude, crime_group, district_name, unit_name, fir_year, place_of_offence
+        SELECT 
+            CASE 
+                WHEN latitude BETWEEN 74.0 AND 79.0 AND longitude BETWEEN 11.0 AND 19.0 THEN longitude
+                ELSE latitude
+            END as latitude,
+            CASE 
+                WHEN latitude BETWEEN 74.0 AND 79.0 AND longitude BETWEEN 11.0 AND 19.0 THEN latitude
+                ELSE longitude
+            END as longitude,
+            crime_group, district_name, unit_name, fir_year, place_of_offence
         FROM fir_raw
         WHERE latitude IS NOT NULL 
           AND longitude IS NOT NULL
-          AND latitude BETWEEN 11.0 AND 19.0
-          AND longitude BETWEEN 74.0 AND 79.0
+          AND ((latitude BETWEEN 11.0 AND 19.0 AND longitude BETWEEN 74.0 AND 79.0)
+            OR (latitude BETWEEN 74.0 AND 79.0 AND longitude BETWEEN 11.0 AND 19.0))
     """
     params = []
 
@@ -62,12 +63,10 @@ def get_crime_hotspots(
     query += " LIMIT %s"
     params.append(limit)
 
-    cur.execute(query, params)
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    with get_db_cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(query, params)
+        rows = cur.fetchall()
 
-    # Format as lightweight GeoJSON FeatureCollection
     features = []
     for r in rows:
         features.append({
@@ -94,17 +93,18 @@ def get_crime_hotspots(
 @router.get("/api/hotspots/filters")
 def get_hotspot_filters():
     """
-    Returns available crime groups and districts for dropdown filtering.
+    Returns available crime groups and districts for dropdown filtering (cached in memory).
     """
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    global _FILTER_CACHE
+    if _FILTER_CACHE:
+        return _FILTER_CACHE
 
-    cur.execute("SELECT DISTINCT crime_group FROM fir_raw WHERE crime_group IS NOT NULL ORDER BY crime_group LIMIT 30")
-    crime_groups = [r["crime_group"] for r in cur.fetchall()]
+    with get_db_cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT DISTINCT crime_group FROM fir_raw WHERE crime_group IS NOT NULL ORDER BY crime_group LIMIT 30")
+        crime_groups = [r["crime_group"] for r in cur.fetchall()]
 
-    cur.execute("SELECT DISTINCT district_name FROM fir_raw WHERE district_name IS NOT NULL ORDER BY district_name LIMIT 40")
-    districts = [r["district_name"] for r in cur.fetchall()]
+        cur.execute("SELECT DISTINCT district_name FROM fir_raw WHERE district_name IS NOT NULL ORDER BY district_name LIMIT 40")
+        districts = [r["district_name"] for r in cur.fetchall()]
 
-    cur.close()
-    conn.close()
-    return {"crime_groups": crime_groups, "districts": districts}
+    _FILTER_CACHE = {"crime_groups": crime_groups, "districts": districts}
+    return _FILTER_CACHE

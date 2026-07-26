@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 conn = psycopg2.connect(
-    host='127.0.0.1', port='5555', dbname='datathon_db',
+    host='127.0.0.1', port=os.environ.get('DB_PORT', '5432'), dbname='datathon_db',
     user='datathon_user', password='datathon_password'
 )
 cur = conn.cursor(cursor_factory=RealDictCursor)

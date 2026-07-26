@@ -12,7 +12,7 @@ DB_PARAMS = {
     'user': 'datathon_user',
     'password': 'datathon_password',
     'host': '127.0.0.1',
-    'port': '5555'
+    'port': os.environ.get('DB_PORT', '5432')
 }
 
 NUM_CASES = 80000

@@ -7,18 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─── DB Connection ────────────────────────────────────────────────────────────
-def get_db_connection():
-    db_name = os.environ.get("DB_NAME")
-    if not db_name:
-        raise RuntimeError("DB_NAME environment variable is not set.")
-    return psycopg2.connect(
-        host=os.environ.get("DB_HOST", "127.0.0.1"),
-        port=os.environ.get("DB_PORT", "5555"),
-        dbname=db_name,
-        user=os.environ.get("DB_USER", "datathon_user"),
-        password=os.environ.get("DB_PASSWORD", "datathon_password")
-    )
+from db import get_db_connection, get_db_cursor
 
 # ─── Schema description passed to LLM ────────────────────────────────────────
 SCHEMA_INFO = """

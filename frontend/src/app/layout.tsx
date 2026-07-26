@@ -22,6 +22,8 @@ export const metadata: Metadata = {
   ],
 };
 
+import ExtensionErrorGuard from "@/components/ExtensionErrorGuard";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -30,6 +32,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-[#050a0e] text-[#e0e7ef]">
+        <ExtensionErrorGuard />
         {children}
       </body>
     </html>

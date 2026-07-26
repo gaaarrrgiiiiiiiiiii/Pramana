@@ -20,7 +20,6 @@ interface LanguageSelectorProps {
 }
 
 export default function LanguageSelector({ currentLanguage, onLanguageChange }: LanguageSelectorProps) {
-  const current = SUPPORTED_LANGUAGES.find(l => l.code === currentLanguage);
   return (
     <div className="flex items-center space-x-2 bg-[#0f1923] border border-[#1e3a50] p-2 rounded-xl">
       <Languages className="w-4 h-4 text-[#00ff88] flex-shrink-0" />

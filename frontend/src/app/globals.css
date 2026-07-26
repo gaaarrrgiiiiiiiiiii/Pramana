@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
 
 :root {
   --background: #050a0e;
@@ -545,8 +546,32 @@ body {
 }
 
 .leaflet-tile-pane {
-  filter: sepia(1) hue-rotate(180deg) brightness(0.7) contrast(1.8) saturate(3) !important;
-  opacity: 0.8;
+  opacity: 0.98;
+}
+
+.hotspot-glow-marker {
+  filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 14px currentColor);
+  transition: all 0.3s ease;
+}
+
+.hotspot-glow-marker:hover {
+  filter: drop-shadow(0 0 12px currentColor) drop-shadow(0 0 24px currentColor);
+}
+
+.hotspot-pulse-ring {
+  box-shadow: 0 0 15px currentColor, 0 0 30px currentColor;
+  animation: hotspot-pulse-anim 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+@keyframes hotspot-pulse-anim {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0.3;
+  }
 }
 
 .leaflet-control-zoom a {

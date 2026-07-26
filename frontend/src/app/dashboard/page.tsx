@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 import { useState, useRef, useEffect } from "react";
 import ChatInterface from "@/components/ChatInterface";
@@ -5,19 +8,32 @@ import NetworkGraph from "@/components/NetworkGraph";
 import HotspotMap from "@/components/HotspotMap";
 import AuditTrail from "@/components/AuditTrail";
 import LanguageSelector from "@/components/LanguageSelector";
-import { Database, Network, MapPin, Printer, History, LogOut, Shield, Sparkles } from "lucide-react";
+import { Database, Network, MapPin, Printer, History, LogOut, Shield, Sparkles, Plus, MessageSquare, ChevronLeft, ChevronRight } from "lucide-react";
 import { useReactToPrint } from "react-to-print";
 import { PrintableReport } from "@/components/PrintableReport";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import axios from "axios";
+
+interface SessionItem {
+  id: number;
+  title: string;
+  updated_at: string;
+  message_count: number;
+}
 
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [language, setLanguage] = useState("Kannada");
   const [activeQueryData, setActiveQueryData] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<"network" | "hotspots">("network");
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const componentRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -29,6 +45,35 @@ export default function DashboardPage() {
     }
   }, [router]);
 
+  // Load session_id from URL query string if present
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sId = urlParams.get("session_id");
+      if (sId) {
+        setActiveSessionId(parseInt(sId, 10));
+      }
+    }
+  }, []);
+
+  // Fetch recent sessions for ChatGPT-style sidebar
+  const fetchSessions = () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    axios
+      .get(`${API_URL}/api/sessions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((res) => {
+        setSessions(res.data || []);
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchSessions();
+  }, []);
+
   // Auto-switch Investigation Board tab based on AI Query Intent
   useEffect(() => {
     if (!activeQueryData) return;
@@ -37,8 +82,9 @@ export default function DashboardPage() {
     } else if (activeQueryData.intent === "network") {
       setActiveTab("network");
     }
+    // Refresh sessions list after a query completes
+    fetchSessions();
   }, [activeQueryData]);
-
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -50,6 +96,8 @@ export default function DashboardPage() {
     contentRef: componentRef,
     documentTitle: `Investigation_Report_${new Date().toISOString().split('T')[0]}`,
   });
+
+  const auditHistoryHref = user?.role === "SCRB Analyst" || user?.role === "DGP" ? "/sessions" : "/my-history";
 
   if (!user) return null;
 
@@ -98,16 +146,15 @@ export default function DashboardPage() {
           )}
 
           <Link
-            href="/sessions"
+            href={auditHistoryHref}
             className="flex items-center space-x-1 bg-[#0f1923] hover:bg-[#152233] text-[#8ba3be] hover:text-[#00ff88] px-3 py-2 rounded-xl text-xs transition-all duration-300 border border-[#1e3a50] hover:border-[rgba(0,255,136,0.2)]"
-            title="Supervisory Chat History"
+            title={user.role === "SCRB Analyst" || user.role === "DGP" ? "Supervisory Audit Portal" : "My History & Activity Audit"}
           >
             <History className="w-4 h-4 text-[#3b82f6]" />
             <span>Audit History</span>
           </Link>
 
           <LanguageSelector currentLanguage={language} onLanguageChange={setLanguage} />
-
 
           <button
             onClick={handleLogout}
@@ -120,16 +167,73 @@ export default function DashboardPage() {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex overflow-hidden p-6 gap-6 pt-2 z-10 relative">
+      <main className="flex-1 flex overflow-hidden p-6 gap-4 pt-2 z-10 relative">
         
+        {/* ChatGPT-style Collapsible Session Sidebar */}
+        <div className={`transition-all duration-300 flex flex-col bg-[#0f1523]/80 backdrop-blur-2xl border border-[#1e293b]/50 shadow-[0_8px_32px_rgba(0,0,0,0.4)] rounded-3xl overflow-hidden ${isSidebarOpen ? "w-[200px]" : "w-[50px]"}`}>
+          <div className="p-3 border-b border-[#1e293b]/50 flex items-center justify-between">
+            {isSidebarOpen && (
+              <span className="text-xs font-semibold text-white tracking-wide truncate">Chats</span>
+            )}
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-1 text-[#4a6580] hover:text-white transition-colors rounded-lg hover:bg-[#152233]"
+              title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            >
+              {isSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            </button>
+          </div>
+
+          <div className="p-2 border-b border-[#1e293b]/30">
+            <button
+              onClick={() => setActiveSessionId(null)}
+              className={`w-full flex items-center space-x-2 text-xs p-2 rounded-xl border transition-all ${
+                activeSessionId === null
+                  ? "bg-[#00ff88]/10 text-[#00ff88] border-[#00ff88]/30 font-semibold"
+                  : "bg-[#0f1923] text-[#8ba3be] border-[#1e3a50] hover:bg-[#152233]"
+              }`}
+              title="New Chat Session"
+            >
+              <Plus className="w-4 h-4 flex-shrink-0" />
+              {isSidebarOpen && <span>New Session</span>}
+            </button>
+          </div>
+
+          {isSidebarOpen && (
+            <div className="flex-1 overflow-y-auto p-2 space-y-1 text-xs">
+              {sessions.map((s) => (
+                <div
+                  key={s.id}
+                  onClick={() => setActiveSessionId(s.id)}
+                  className={`p-2 rounded-xl cursor-pointer transition-all border ${
+                    activeSessionId === s.id
+                      ? "bg-[rgba(0,255,136,0.08)] border-[rgba(0,255,136,0.25)] text-white font-medium"
+                      : "bg-[#0f1923]/40 border-transparent hover:bg-[#0f1923] text-[#8ba3be] hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2 truncate">
+                    <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${activeSessionId === s.id ? "text-[#00ff88]" : "text-[#4a6580]"}`} />
+                    <span className="truncate flex-1">{s.title}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Left Col: Chat Interface Panel (Floating Soft Card) */}
-        <div className="w-[380px] bg-[#0f1523]/80 backdrop-blur-2xl border border-[#1e293b]/50 shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col rounded-3xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-[#1e293b]/50 bg-[#161d2d]/50 flex items-center">
+        <div className="w-[360px] bg-[#0f1523]/80 backdrop-blur-2xl border border-[#1e293b]/50 shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col rounded-3xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-[#1e293b]/50 bg-[#161d2d]/50 flex items-center justify-between">
             <h2 className="font-semibold text-white tracking-wide">Query Interface</h2>
           </div>
           
           <div className="flex-1 overflow-hidden relative">
-            <ChatInterface language={language} onQueryComplete={setActiveQueryData} />
+            <ChatInterface
+              language={language}
+              onQueryComplete={setActiveQueryData}
+              activeSessionId={activeSessionId}
+              onSessionChange={(id) => setActiveSessionId(id)}
+            />
           </div>
         </div>
 
@@ -138,17 +242,17 @@ export default function DashboardPage() {
           
           {/* Tab Selection Toolbar */}
           <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-20 pointer-events-none">
-            <div className="flex items-center space-x-2 px-4 py-2 bg-[#111827]/80 backdrop-blur-xl border border-[#1e293b]/60 rounded-2xl pointer-events-auto">
-              <Sparkles className="w-4 h-4 text-[#3b82f6] animate-pulse" />
+            <div className="flex items-center space-x-2 px-4 py-2 bg-[#111827]/80 backdrop-blur-xl border border-[#1e293b]/60 rounded-2xl pointer-events-auto shadow-lg">
+              <Sparkles className="w-4 h-4 text-[#00ff88] animate-pulse" />
               <h2 className="text-sm font-bold text-white tracking-wide">Investigation Board</h2>
             </div>
 
             <div className="flex items-center bg-[#111827]/80 backdrop-blur-xl border border-[#1e293b]/60 rounded-2xl p-1 space-x-1 pointer-events-auto shadow-lg">
               <button
                 onClick={() => setActiveTab("network")}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-300 ${
+                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-300 cursor-pointer ${
                   activeTab === "network"
-                    ? "bg-[#2563eb] text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]"
+                    ? "bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/50 shadow-[0_0_15px_rgba(0,255,136,0.3)] font-bold"
                     : "text-[#8ba3be] hover:text-white hover:bg-[#1f2937]"
                 }`}
               >
@@ -158,9 +262,9 @@ export default function DashboardPage() {
 
               <button
                 onClick={() => setActiveTab("hotspots")}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-300 ${
+                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-300 cursor-pointer ${
                   activeTab === "hotspots"
-                    ? "bg-[#10b981] text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]"
+                    ? "bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/50 shadow-[0_0_15px_rgba(0,255,136,0.3)] font-bold"
                     : "text-[#8ba3be] hover:text-white hover:bg-[#1f2937]"
                 }`}
               >
@@ -172,8 +276,8 @@ export default function DashboardPage() {
 
           {/* Dynamic Panel Content */}
           <div className="flex-1 overflow-hidden relative">
-            {/* Simulated globe background glow to match reference image */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-[radial-gradient(circle_at_center,_rgba(37,99,235,0.06)_0%,_transparent_65%)] rounded-full pointer-events-none" />
+            {/* Simulated globe background glow */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-[radial-gradient(circle_at_center,_rgba(0,255,136,0.05)_0%,_transparent_65%)] rounded-full pointer-events-none" />
 
             {activeTab === "hotspots" ? (
               <HotspotMap initialFilters={activeQueryData?.raw_data?.hotspot_filters} />
@@ -181,8 +285,8 @@ export default function DashboardPage() {
               <NetworkGraph data={activeQueryData.raw_data} />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center space-y-6 relative z-10">
-                <div className="relative z-10 w-24 h-24 rounded-full bg-[#111827]/80 border border-[#3b82f6]/30 flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.15)] backdrop-blur-xl">
-                  <Database className="w-10 h-10 text-[#3b82f6] opacity-80" />
+                <div className="relative z-10 w-24 h-24 rounded-full bg-[#111827]/80 border border-[#00ff88]/30 flex items-center justify-center shadow-[0_0_30px_rgba(0,255,136,0.2)] backdrop-blur-xl">
+                  <Database className="w-10 h-10 text-[#00ff88] opacity-90 animate-pulse" />
                 </div>
                 <div className="text-center">
                   <p className="text-lg text-white font-semibold drop-shadow-md mb-2">
@@ -200,7 +304,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Right Col: Audit Trail Panel */}
-        <div className="w-[340px] bg-[#0f1523]/80 backdrop-blur-2xl border border-[#1e293b]/50 shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col rounded-3xl overflow-hidden">
+        <div className="w-[320px] bg-[#0f1523]/80 backdrop-blur-2xl border border-[#1e293b]/50 shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col rounded-3xl overflow-hidden">
           <div className="px-6 py-4 border-b border-[#1e293b]/50 bg-[#161d2d]/50 flex items-center">
             <h2 className="font-semibold text-white tracking-wide">Live Audit Trail</h2>
           </div>

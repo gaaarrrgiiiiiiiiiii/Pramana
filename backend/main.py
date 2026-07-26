@@ -22,7 +22,8 @@ from synthesis_agent import synthesize_response
 from skeptic_agent import run_skeptic
 from rbac_agent import check_rbac
 from audio_processor import router as audio_router
-from auth import router as auth_router, get_current_user, get_db_connection
+from auth import router as auth_router, get_current_user
+from db import get_db_connection, get_db_cursor, release_db_connection
 from hotspot_agent import router as hotspot_router
 from logger import get_logger, new_request_id, Timer
 
@@ -37,7 +38,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -107,7 +108,7 @@ def _log_activity(
         ))
         conn.commit()
         cur.close()
-        conn.close()
+        release_db_connection(conn)
     except Exception as exc:
         log.error("activity_log_write_failed", extra={"error": str(exc)})
 
@@ -158,7 +159,7 @@ async def health_check():
             cur = conn.cursor()
             cur.execute("SELECT 1")
             cur.close()
-            conn.close()
+            release_db_connection(conn)
         status["db"] = f"ok ({t.elapsed}s)"
         log.info("health_check_db_ok", extra={"latency": t.elapsed})
     except Exception as e:
@@ -263,7 +264,7 @@ async def process_query(
             session_id = cur.fetchone()["id"]
             conn.commit()
             cur.close()
-            conn.close()
+            release_db_connection(conn)
         except Exception as e:
             log.error("session_create_failed", extra={
                 "request_id": request_id, "error": str(e)
@@ -450,7 +451,7 @@ async def process_query(
             cur.execute("UPDATE sessions SET updated_at = NOW() WHERE id = %s", (session_id,))
             conn.commit()
             cur.close()
-            conn.close()
+            release_db_connection(conn)
         except Exception as e:
             log.error("message_persist_failed", extra={
                 "request_id": request_id, "error": str(e)
@@ -506,7 +507,7 @@ async def submit_feedback(
         updated = cur.fetchone()
         conn.commit()
         cur.close()
-        conn.close()
+        release_db_connection(conn)
     except Exception as e:
         log.error("feedback_write_failed", extra={"error": str(e)})
         raise HTTPException(status_code=500, detail="Could not save feedback")
@@ -549,8 +550,37 @@ async def get_activity_log(
         """, (min(limit, 500),))
         rows = cur.fetchall()
         cur.close()
-        conn.close()
+        release_db_connection(conn)
         return rows
     except Exception as e:
         log.error("activity_log_read_failed", extra={"error": str(e)})
         raise HTTPException(status_code=500, detail="Could not read activity log")
+
+
+# ── Personal Activity log query endpoint (All authenticated users) ────────────
+@app.get("/api/audit-log/me", tags=["System"])
+async def get_my_activity_log(
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user)
+):
+    """Return recent activity log entries for the currently authenticated user."""
+    user_id = current_user.get("id")
+    try:
+        with get_db_cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT a.*, u.full_name, u.badge_number
+                FROM activity_log a
+                LEFT JOIN users u ON a.user_id = u.id
+                WHERE a.user_id = %s
+                ORDER BY a.created_at DESC
+                LIMIT %s
+            """, (user_id, min(limit, 200)))
+            rows = cur.fetchall()
+            for r in rows:
+                if r.get("created_at"):
+                    r["created_at"] = r["created_at"].isoformat()
+            return rows
+    except Exception as e:
+        log.error("my_activity_log_read_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="Could not read personal activity log")
+

@@ -1,6 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Mic, Loader2, Plus, MessageSquare, ThumbsUp, ThumbsDown, Sparkles } from "lucide-react";
+import { Send, Mic, Loader2, Plus, MessageSquare, ThumbsUp, ThumbsDown, Sparkles, X, Volume2, Sparkle } from "lucide-react";
 import axios from "axios";
 import { SUPPORTED_LANGUAGES } from "./LanguageSelector";
 
@@ -13,19 +16,57 @@ interface Message {
   feedback?: 1 | -1 | null;   // +1 = helpful, -1 = not helpful
 }
 
+// Client-side law enforcement phonetic vocabulary smoother
+const normalizePoliceJargon = (text: string): string => {
+  let norm = text;
+  const replacements: [RegExp, string][] = [
+    [/\b(fir|f\.i\.r\.|eff i ar|ef i ar)\b/gi, "FIR"],
+    [/\b(arms act|arm act|arm's act|arms act 1959)\b/gi, "ARMS ACT 1959"],
+    [/\b(cyber crime|cybercrime|cyber climb)\b/gi, "CYBER CRIME"],
+    [/\b(adugodi|a 2 go d|adugodi ps)\b/gi, "Adugodi PS"],
+    [/\b(kalasipalya|kalasi palya)\b/gi, "Kalasipalya PS"],
+    [/\b(banashankari|bana sankari)\b/gi, "Banashankari PS"],
+    [/\b(chandrakala|chandra kala|officer chandrakala)\b/gi, "CHANDRAKALA M B"],
+    [/\b(gokak|go kak)\b/gi, "Gokak Town PS"],
+    [/\b(kr puram|k r puram|k\.r\. puram)\b/gi, "K.R. Puram PS"],
+    [/\b(hal ps|h a l ps|h\.a\.l\. ps)\b/gi, "H.A.L. PS"],
+    [/\b(bengaluru|bangalore)\b/gi, "Bengaluru City"],
+    [/\b(mysuru|mysore)\b/gi, "Mysuru"],
+    [/\b(belagavi|belgaum)\b/gi, "Belagavi"],
+    [/\b(hubballi|hubli)\b/gi, "Hubballi-Dharwad"],
+  ];
+  for (const [pattern, replacement] of replacements) {
+    norm = norm.replace(pattern, replacement);
+  }
+  return norm;
+};
 
 export default function ChatInterface({
   language,
   onQueryComplete,
+  activeSessionId,
+  onSessionChange,
 }: {
   language: string;
   onQueryComplete: (data: any) => void;
+  activeSessionId?: number | null;
+  onSessionChange?: (id: number | null) => void;
 }) {
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [history, setHistory] = useState<any[]>([]); // Multi-turn context buffer
-  const [sessionId, setSessionId] = useState<number | null>(null); // Active DB session id
+  const [history, setHistory] = useState<any[]>([]);
+  const [sessionId, setSessionId] = useState<number | null>(activeSessionId ?? null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSessionLoading, setIsSessionLoading] = useState(false);
+  
+  // Voice Recording States
+  const [isListening, setIsListening] = useState(false);
+  const [isAiTranscribing, setIsAiTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+
+  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -33,20 +74,193 @@ export default function ChatInterface({
   const langMeta = SUPPORTED_LANGUAGES.find((l) => l.code === language);
   const nativeLabel = langMeta?.native ?? language;
 
-  // Auto-scroll to the latest message
+  // Auto-scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
-  // Start a fresh session (clears local chat + unbinds DB session)
+  // Sync state when activeSessionId changes from parent
+  useEffect(() => {
+    if (activeSessionId === undefined) return;
+    setSessionId(activeSessionId);
+    if (!activeSessionId) {
+      setMessages([]);
+      setHistory([]);
+      return;
+    }
+
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setIsSessionLoading(true);
+    axios
+      .get(`${API_URL}/api/sessions/${activeSessionId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((res) => {
+        const rawMsgs = res.data.messages || [];
+        const loadedMsgs: Message[] = [];
+        const loadedHistory: any[] = [];
+
+        rawMsgs.forEach((m: any) => {
+          loadedMsgs.push({ role: "user", text: m.query });
+          loadedMsgs.push({
+            role: "agent",
+            text: m.answer_english || "",
+            translated: m.answer_translated || "",
+            language: m.language || "English",
+            messageId: m.id,
+            feedback: m.feedback,
+          });
+          loadedHistory.push({ query: m.query, answer_english: m.answer_english });
+        });
+
+        setMessages(loadedMsgs);
+        setHistory(loadedHistory.slice(-5));
+        setIsSessionLoading(false);
+      })
+      .catch(() => {
+        setIsSessionLoading(false);
+      });
+  }, [activeSessionId, API_URL]);
+
+  const getSpeechLangCode = (lang: string): string => {
+    switch (lang.toLowerCase()) {
+      case "kannada": return "kn-IN";
+      case "hindi": return "hi-IN";
+      case "tamil": return "ta-IN";
+      case "telugu": return "te-IN";
+      case "marathi": return "mr-IN";
+      default: return "en-IN";
+    }
+  };
+
+  // Process recorded audio blob via Gemini 2.5 Flash Multimodal STT Backend API
+  const sendAudioToGeminiBackend = async (audioBlob: Blob) => {
+    if (audioBlob.size < 1000) return; // Skip tiny recordings
+    setIsAiTranscribing(true);
+    try {
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "recording.webm");
+      formData.append("role", "Field Officer");
+
+      const res = await axios.post(`${API_URL}/voice-query`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (res.data?.transcription) {
+        const highAccuracyText = normalizePoliceJargon(res.data.transcription);
+        setQuery(highAccuracyText);
+      }
+    } catch (err: any) {
+      console.warn("Backend Gemini STT note:", err?.response?.data?.detail || err.message);
+    } finally {
+      setIsAiTranscribing(false);
+    }
+  };
+
+  // Toggle voice recording with Web Speech + MediaRecorder dual engine
+  const toggleVoiceRecording = async () => {
+    setVoiceError(null);
+
+    // Stop recording if active
+    if (isListening) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      setIsListening(false);
+      return;
+    }
+
+    // Start recording
+    audioChunksRef.current = [];
+
+    // 1. Request microphone stream for MediaRecorder audio capture
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        stream.getTracks().forEach((track) => track.stop());
+        sendAudioToGeminiBackend(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsListening(true);
+    } catch (err: any) {
+      console.warn("MediaRecorder mic access:", err);
+    }
+
+    // 2. Start Web Speech API for real-time live typing feedback
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = getSpeechLangCode(language);
+
+        recognition.onstart = () => {
+          setIsListening(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          let interimTranscript = "";
+          let finalTranscript = "";
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript;
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
+          }
+
+          const rawText = finalTranscript || interimTranscript;
+          if (rawText) {
+            setQuery(normalizePoliceJargon(rawText));
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          console.warn("WebSpeech API event:", event.error);
+          if (event.error === "not-allowed" || event.error === "permission-denied") {
+            setVoiceError("Microphone blocked. Click the camera/mic icon in your address bar to allow.");
+          }
+        };
+
+        recognition.onend = () => {
+          // Handled by MediaRecorder stop
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+      } catch (err) {
+        console.warn("WebSpeech fallback error:", err);
+      }
+    }
+  };
+
   const startNewChat = () => {
     setMessages([]);
     setHistory([]);
     setSessionId(null);
+    if (onSessionChange) onSessionChange(null);
     onQueryComplete(null);
   };
 
-  // Submit 👍/👎 feedback for a specific agent message
   const submitFeedback = async (msgIndex: number, value: 1 | -1) => {
     const msg = messages[msgIndex];
     if (!msg.messageId || msg.feedback !== null) return;
@@ -61,13 +275,23 @@ export default function ChatInterface({
         prev.map((m, i) => (i === msgIndex ? { ...m, feedback: value } : m))
       );
     } catch {
-      // Silently ignore feedback errors — non-critical
+      // ignore
     }
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!query.trim()) return;
+
+    if (isListening) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      setIsListening(false);
+    }
 
     const currentQuery = query;
     setMessages((prev) => [...prev, { role: "user", text: currentQuery }]);
@@ -86,7 +310,7 @@ export default function ChatInterface({
         {
           query: currentQuery,
           language: language,
-          session_id: sessionId,        // null → backend auto-creates; number → appends to existing
+          session_id: sessionId,
           conversation_history: history,
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -95,9 +319,9 @@ export default function ChatInterface({
       const data = res.data;
       onQueryComplete(data);
 
-      // Capture session_id from first response and persist it across turns
       if (data.session_id && !sessionId) {
         setSessionId(data.session_id);
+        if (onSessionChange) onSessionChange(data.session_id);
       }
 
       setMessages((prev) => [
@@ -112,7 +336,6 @@ export default function ChatInterface({
         },
       ]);
 
-      // Keep last 5 turns for context window
       setHistory((prev) => [
         ...prev.slice(-4),
         { query: currentQuery, answer_english: data.answer_english },
@@ -141,7 +364,7 @@ export default function ChatInterface({
 
   return (
     <div className="flex flex-col h-full bg-[#0a1018]">
-      {/* Chat Header — session indicator + New Chat button */}
+      {/* Chat Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#152233] bg-[#0a1018]/90 backdrop-blur-sm">
         <div className="flex items-center space-x-2 text-xs text-[#4a6580]">
           <MessageSquare className="w-3.5 h-3.5 text-[#00ff88]" />
@@ -159,7 +382,7 @@ export default function ChatInterface({
         </div>
         <button
           onClick={startNewChat}
-          className="flex items-center space-x-1.5 text-xs bg-[#0f1923] hover:bg-[#152233] text-[#8ba3be] hover:text-[#00ff88] px-2.5 py-1.5 rounded-lg border border-[#1e3a50] hover:border-[rgba(0,255,136,0.2)] transition-all duration-300"
+          className="flex items-center space-x-1.5 text-xs bg-[#0f1923] hover:bg-[#152233] text-[#8ba3be] hover:text-[#00ff88] px-2.5 py-1.5 rounded-lg border border-[#1e3a50] hover:border-[rgba(0,255,136,0.2)] transition-all duration-300 cursor-pointer"
           title="Start a new investigation session"
         >
           <Plus className="w-3.5 h-3.5" />
@@ -169,20 +392,25 @@ export default function ChatInterface({
 
       {/* Message Thread */}
       <div className="flex-1 p-4 overflow-y-auto space-y-4">
-        {messages.length === 0 && (
-          <div className="text-center mt-20 space-y-3">
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-[#0f1923] border border-[#152233] flex items-center justify-center mb-4">
-              <Sparkles className="w-8 h-8 text-[#00ff88] opacity-40" />
+        {isSessionLoading ? (
+          <div className="flex items-center justify-center h-full text-xs text-[#4a6580] space-x-2">
+            <Loader2 className="w-4 h-4 animate-spin text-[#00ff88]" />
+            <span>Loading investigation history...</span>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="text-center mt-16 space-y-3">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-[#0f1923] border border-[#152233] flex items-center justify-center mb-4 shadow-[0_0_20px_rgba(0,255,136,0.1)]">
+              <Sparkles className="w-8 h-8 text-[#00ff88] opacity-60 animate-pulse" />
             </div>
-            <p className="text-[#8ba3be] text-sm">Ask a question about FIRs, cases, or criminal networks.</p>
+            <p className="text-[#8ba3be] text-sm font-medium">Ask a question about FIRs, cases, or criminal networks.</p>
             <p className="text-xs text-[#4a6580]">
               Context-aware conversation active. Replies translated to{" "}
-              <span className="text-[#00ff88]">{nativeLabel}</span>
+              <span className="text-[#00ff88] font-semibold">{nativeLabel}</span>
             </p>
           </div>
-        )}
+        ) : null}
 
-        {messages.map((m, i) => (
+        {!isSessionLoading && messages.map((m, i) => (
           <div
             key={i}
             className={`flex flex-col ${
@@ -196,7 +424,7 @@ export default function ChatInterface({
                   : "bg-[#0f1923] text-[#e0e7ef] border border-[#1e3a50] rounded-bl-none"
               }`}
             >
-              <p className="whitespace-pre-wrap">{m.text}</p>
+              <p className="whitespace-pre-wrap text-sm">{m.text}</p>
 
               {m.translated && m.language !== "English" && (
                 <div className={`mt-3 pt-3 border-t ${m.role === "user" ? "border-[rgba(5,10,14,0.2)]" : "border-[#152233]"}`}>
@@ -250,37 +478,96 @@ export default function ChatInterface({
           </div>
         )}
 
-        {/* Auto-scroll anchor */}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input Bar */}
-      <div className="p-4 bg-[#0a1018] border-t border-[#152233]">
+      <div className="p-4 bg-[#0a1018] border-t border-[#152233] relative">
+        {/* Live Recording HUD Banner */}
+        {isListening && (
+          <div className="mb-2 bg-red-950/90 border border-red-500/50 rounded-xl px-3 py-2 text-xs text-red-300 flex items-center justify-between animate-pulse shadow-lg">
+            <div className="flex items-center space-x-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+              <Volume2 className="w-4 h-4 text-red-400" />
+              <span className="font-semibold">Listening to Voice...</span>
+              <span className="text-[11px] text-red-400 font-mono">({nativeLabel})</span>
+            </div>
+            <button
+              type="button"
+              onClick={toggleVoiceRecording}
+              className="text-[10px] underline hover:text-white font-medium cursor-pointer"
+            >
+              Done / Refine AI
+            </button>
+          </div>
+        )}
+
+        {/* Gemini AI Transcribing Banner */}
+        {isAiTranscribing && (
+          <div className="mb-2 bg-[#00ff88]/10 border border-[#00ff88]/40 rounded-xl px-3 py-2 text-xs text-[#00ff88] flex items-center space-x-2 animate-pulse shadow-lg">
+            <Sparkle className="w-4 h-4 text-[#00ff88] animate-spin" />
+            <span>Refining voice audio with Gemini 2.5 Multimodal AI...</span>
+          </div>
+        )}
+
+        {/* Voice Error Alert */}
+        {voiceError && (
+          <div className="mb-2 bg-amber-950/90 border border-amber-500/40 rounded-xl px-3 py-2 text-xs text-amber-300 flex items-center justify-between shadow-lg">
+            <span>{voiceError}</span>
+            <button
+              type="button"
+              onClick={() => setVoiceError(null)}
+              className="text-amber-400 hover:text-white text-xs font-bold ml-2 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="relative flex items-center">
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Ask follow-ups... (reply in ${nativeLabel})`}
-            className="w-full bg-[#0f1923] text-[#e0e7ef] rounded-full pl-5 pr-24 py-3 outline-none border border-[#1e3a50] focus:border-[#00ff88] transition-all duration-300 focus:shadow-[0_0_15px_rgba(0,255,136,0.08)] shadow-inner"
+            placeholder={
+              isListening
+                ? `Listening... speak in ${nativeLabel}`
+                : isAiTranscribing
+                ? `Gemini AI transcribing audio...`
+                : `Ask follow-ups... (reply in ${nativeLabel})`
+            }
+            className={`w-full bg-[#0f1923] text-[#e0e7ef] rounded-full pl-5 pr-24 py-3 outline-none border transition-all duration-300 focus:shadow-[0_0_15px_rgba(0,255,136,0.08)] shadow-inner text-sm ${
+              isListening ? "border-red-500/80 shadow-[0_0_15px_rgba(239,68,68,0.2)]" : "border-[#1e3a50] focus:border-[#00ff88]"
+            }`}
           />
           <div className="absolute right-2 flex items-center space-x-1">
             <button
               type="button"
-              className="p-2 text-[#4a6580] hover:text-[#00ff88] transition-colors rounded-full hover:bg-[#152233]"
-              title="Voice input"
+              onClick={toggleVoiceRecording}
+              className={`p-2 rounded-full transition-all duration-300 cursor-pointer ${
+                isListening
+                  ? "bg-red-500/20 text-red-400 border border-red-500/60 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.4)]"
+                  : "text-[#4a6580] hover:text-[#00ff88] hover:bg-[#152233]"
+              }`}
+              title={isListening ? "Stop voice recording" : "Record voice input"}
             >
               <Mic className="w-5 h-5" />
             </button>
+
             <button
               type="submit"
               disabled={isLoading || !query.trim()}
-              className="p-2 bg-gradient-to-r from-[#00ff88] to-[#00cc6a] text-[#050a0e] rounded-full hover:shadow-[0_0_15px_rgba(0,255,136,0.3)] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 shadow-md"
+              className="p-2 bg-gradient-to-r from-[#00ff88] to-[#00cc6a] text-[#050a0e] rounded-full hover:shadow-[0_0_15px_rgba(0,255,136,0.3)] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 shadow-md cursor-pointer"
             >
               <Send className="w-5 h-5" />
             </button>
           </div>
         </form>
+
+        {/* Helper Voice Hint */}
+        <p className="text-[10px] text-[#4a6580] mt-1.5 text-center">
+          💡 <span className="text-[#8ba3be]">Tip:</span> Try speaking <span className="text-[#00ff88]">&quot;Show criminal network for CYBER CRIME&quot;</span> or <span className="text-[#00ff88]">&quot;Cases investigated by CHANDRAKALA M B&quot;</span>
+        </p>
       </div>
     </div>
   );

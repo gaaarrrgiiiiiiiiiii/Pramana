@@ -13,6 +13,7 @@ Strategy:
 Run: python import_real_data.py
 """
 
+import os
 import psycopg2
 from psycopg2.extras import execute_values
 import pandas as pd
@@ -26,7 +27,7 @@ DB_PARAMS = {
     'user':   'datathon_user',
     'password': 'datathon_password',
     'host':   '127.0.0.1',
-    'port':   '5555'
+    'port':   os.environ.get('DB_PORT', '5432')
 }
 
 CSV_PATH  = 'data/FIR_Details_Data.csv'

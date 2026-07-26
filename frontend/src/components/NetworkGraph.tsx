@@ -1,7 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import cytoscape from "cytoscape";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Shield, AlertTriangle, ArrowRight, X } from "lucide-react";
 
 // Premium color palette for node types
 const NODE_COLORS: Record<string, string> = {
@@ -19,15 +20,16 @@ const NODE_SHAPES: Record<string, string> = {
 };
 
 const NODE_SIZES: Record<string, number> = {
-  investigator: 45,
+  investigator: 48,
   station:      52,
-  case:         32,
+  case:         34,
   crime_group:  48,
 };
 
 export default function NetworkGraph({ data }: { data: any }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef        = useRef<cytoscape.Core | null>(null);
+  const [selectedPathNodes, setSelectedPathNodes] = useState<string[] | null>(null);
 
   useEffect(() => {
     // Guard: need both a valid container and real node data
@@ -45,7 +47,6 @@ export default function NetworkGraph({ data }: { data: any }) {
       .filter((e: any) => {
         const src = String(e.source);
         const tgt = String(e.target);
-        // Drop orphan edges and self-loops — these cause the Cytoscape warning
         return nodeIds.has(src) && nodeIds.has(tgt) && src !== tgt;
       })
       .map((e: any) => ({
@@ -57,7 +58,6 @@ export default function NetworkGraph({ data }: { data: any }) {
         },
       }));
 
-    // Destroy previous instance first to prevent the "notify" unmount crash
     if (cyRef.current) {
       cyRef.current.destroy();
       cyRef.current = null;
@@ -67,7 +67,6 @@ export default function NetworkGraph({ data }: { data: any }) {
       container: containerRef.current,
       elements:  [...cyNodes, ...cyEdges],
 
-      // ── Neon Stylesheet ───────────────────────────────────────
       style: [
         {
           selector: "node",
@@ -81,43 +80,47 @@ export default function NetworkGraph({ data }: { data: any }) {
               (NODE_SHAPES[(ele.data("type") as string)] ?? "ellipse") as any,
             label:                "data(label)",
             color:                "#ffffff",
-            "text-outline-color": "#000000",
+            "text-outline-color": "#050a0e",
             "text-outline-width": 3,
-            "font-size":          12,
+            "font-size":          11,
             "font-weight":        "bold",
             "text-valign":        "bottom",
             "text-halign":        "center",
             "text-margin-y":      8,
-            "border-width":       4,
-            "border-color": "#ffffff",
+            "text-wrap":          "wrap",
+            "text-max-width":     "110px",
+            "border-width":       3,
+            "border-color":       "#ffffff",
             "border-opacity":     0.8,
-            // Neon glow via overlay
             "overlay-padding":    "12px",
             "overlay-opacity":    0.2,
             "overlay-color": (ele: any) => NODE_COLORS[(ele.data("type") as string)] ?? "#00ff88",
+            "transition-property": "opacity, border-color, border-width",
+            "transition-duration": 0.3,
           } as any,
         },
         {
           selector: "edge",
           style: {
-            "curve-style":             "haystack",
-            "haystack-radius":         0,
-            width:                     2,
+            "curve-style":             "bezier",
+            width:                     2.5,
             "line-color":              "#1e3a50",
             "line-opacity":            0.7,
             label:                     "data(label)",
             "font-size":               8,
-            color:                     "#4a6580",
+            color:                     "#8ba3be",
             "text-background-opacity": 1,
             "text-background-color":   "#050a0e",
             "text-background-padding": "3px",
+            "transition-property": "line-color, width, opacity",
+            "transition-duration": 0.3,
           } as any,
         },
         {
           selector: "node:selected",
           style: {
             "border-color": "#ffffff",
-            "border-width": 6,
+            "border-width": 5,
             "border-opacity": 1,
             "overlay-opacity": 0.4,
           } as any,
@@ -130,20 +133,58 @@ export default function NetworkGraph({ data }: { data: any }) {
             "line-opacity": 1,
           } as any,
         },
-        // Hover effects
+        /* Highlight path connection from leaf node to main entity */
         {
-          selector: "node:active",
+          selector: ".path-highlight",
           style: {
-            "overlay-opacity": 0.5,
+            "line-color": "#00ff88",
+            "target-arrow-color": "#00ff88",
+            width: 5,
+            "line-opacity": 1,
+            "border-color": "#00ff88",
+            "border-width": 5,
+            "border-opacity": 1,
+            "overlay-color": "#00ff88",
+            "overlay-opacity": 0.4,
+            opacity: 1,
+            "z-index": 999
+          } as any,
+        },
+        {
+          selector: "node.selected-leaf",
+          style: {
+            "border-color": "#00f0ff",
+            "border-width": 6,
+            "overlay-color": "#00f0ff",
+            "overlay-opacity": 0.6,
+            opacity: 1,
+            "z-index": 1000
+          } as any,
+        },
+        {
+          selector: "node.main-entity-target",
+          style: {
+            "border-color": "#00ff88",
+            "border-width": 6,
+            "overlay-color": "#00ff88",
+            "overlay-opacity": 0.6,
+            opacity: 1,
+            "z-index": 1000
+          } as any,
+        },
+        {
+          selector: ".path-dimmed",
+          style: {
+            opacity: 0.15,
+            "text-opacity": 0.2,
           } as any,
         },
       ],
 
-      // ── Layout ───────────────────────────────────────────
       layout: {
         name:          "breadthfirst",
-        padding:       50,
-        spacingFactor: 1.6,
+        padding:       40,
+        spacingFactor: 1.5,
         animate:       false,
         avoidOverlap:  true,
       } as any,
@@ -153,9 +194,88 @@ export default function NetworkGraph({ data }: { data: any }) {
       wheelSensitivity: 0.3,
     });
 
+    // Node click/tap event listener: trace leaf node to main entity path
+    const findMainEntityNode = () => {
+      const targetTerm = (data.target || "").toLowerCase();
+      let mainNode: any = null;
+
+      if (targetTerm) {
+        mainNode = cy.nodes().filter((n: any) => {
+          const label = (n.data("label") || "").toLowerCase();
+          const id = (n.data("id") || "").toLowerCase();
+          return label.includes(targetTerm) || id.includes(targetTerm);
+        })[0];
+      }
+
+      if (!mainNode) {
+        const investigators = cy.nodes('[type = "investigator"]');
+        if (investigators.length > 0) mainNode = investigators[0];
+      }
+
+      if (!mainNode) {
+        let maxDeg = -1;
+        cy.nodes().forEach((n: any) => {
+          const d = n.degree();
+          if (d > maxDeg) {
+            maxDeg = d;
+            mainNode = n;
+          }
+        });
+      }
+
+      return mainNode;
+    };
+
+    cy.on("tap", "node", (evt: any) => {
+      const node = evt.target;
+      const mainNode = findMainEntityNode();
+
+      cy.elements().removeClass("path-highlight path-dimmed selected-leaf main-entity-target");
+
+      if (!mainNode || mainNode.id() === node.id()) {
+        const neighbors = node.closedNeighborhood();
+        neighbors.addClass("path-highlight");
+        node.addClass("main-entity-target");
+        cy.elements().difference(neighbors).addClass("path-dimmed");
+        setSelectedPathNodes([node.data("label")]);
+        return;
+      }
+
+      // Compute shortest graph path connecting selected node (leaf) to main entity node
+      const astar = cy.elements().aStar({
+        root: node,
+        goal: mainNode,
+        directed: false,
+      });
+
+      if (astar.found) {
+        const pathElems = astar.path;
+        pathElems.addClass("path-highlight");
+        node.addClass("selected-leaf");
+        mainNode.addClass("main-entity-target");
+        cy.elements().difference(pathElems).addClass("path-dimmed");
+
+        const pathNodes = astar.path.filter("node");
+        const labels = pathNodes.map((n: any) => n.data("label"));
+        setSelectedPathNodes(labels);
+      } else {
+        const neighborhood = node.closedNeighborhood();
+        neighborhood.addClass("path-highlight");
+        node.addClass("selected-leaf");
+        cy.elements().difference(neighborhood).addClass("path-dimmed");
+        setSelectedPathNodes([node.data("label"), mainNode.data("label")]);
+      }
+    });
+
+    cy.on("tap", (evt: any) => {
+      if (evt.target === cy) {
+        cy.elements().removeClass("path-highlight path-dimmed selected-leaf main-entity-target");
+        setSelectedPathNodes(null);
+      }
+    });
+
     cyRef.current = cy;
 
-    // Cleanup on unmount or data change — prevents "Cannot read properties of null (notify)"
     return () => {
       if (cyRef.current) {
         cyRef.current.destroy();
@@ -164,30 +284,32 @@ export default function NetworkGraph({ data }: { data: any }) {
     };
   }, [data]);
 
+  const clearSelection = () => {
+    if (cyRef.current) {
+      cyRef.current.elements().removeClass("path-highlight path-dimmed selected-leaf main-entity-target");
+    }
+    setSelectedPathNodes(null);
+  };
+
   if (!data?.nodes?.length) {
     return (
       <div className="p-4 w-full h-full flex flex-col items-center justify-center gap-4 relative">
-        {/* Background decoration */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(37,99,235,0.06)_0%,_transparent_60%)]" />
-        <div className="w-24 h-24 rounded-full bg-[#111827]/80 border border-[#3b82f6]/30 flex items-center justify-center relative z-10 backdrop-blur-xl shadow-[0_0_30px_rgba(37,99,235,0.15)]">
-          <Sparkles className="w-10 h-10 text-[#3b82f6] opacity-80 animate-pulse" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(0,255,136,0.05)_0%,_transparent_60%)]" />
+        <div className="w-24 h-24 rounded-full bg-[#111827]/80 border border-[#00ff88]/30 flex items-center justify-center relative z-10 backdrop-blur-xl shadow-[0_0_30px_rgba(0,255,136,0.2)]">
+          <Sparkles className="w-10 h-10 text-[#00ff88] opacity-90 animate-pulse" />
         </div>
         <p className="text-lg text-white font-semibold relative z-10 drop-shadow-md">No network data generated for this query.</p>
-        <p className="text-sm text-[#8ba3be] relative z-10">
-          Try asking: <span className="text-[#3b82f6]">"Who is connected to Ravi?"</span>
+        <p className="text-sm text-[#8ba3be] relative z-10 text-center">
+          Try asking: <span className="text-[#00ff88] font-semibold">&quot;Show criminal network for CYBER CRIME&quot;</span> or <span className="text-[#00ff88] font-semibold">&quot;Cases investigated by CHANDRAKALA M B&quot;</span>
         </p>
       </div>
     );
   }
 
+  const isInvestigatorTarget = data.target_type === "investigator";
+
   return (
     <div className="w-full h-full bg-[#050a0e] relative overflow-hidden">
-      {/* ── Tactical Overlays ── */}
-      <div className="hud-corner hud-corner--tl" />
-      <div className="hud-corner hud-corner--tr" />
-      <div className="hud-corner hud-corner--bl" />
-      <div className="hud-corner hud-corner--br" />
-
       {/* Background grid */}
       <div
         className="absolute inset-0 pointer-events-none z-0 grid-animated"
@@ -198,17 +320,69 @@ export default function NetworkGraph({ data }: { data: any }) {
         }}
       />
 
-      {/* Radial glow */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(0,255,136,0.04)_0%,_transparent_50%)] pointer-events-none z-0" />
 
       {/* Cytoscape mount point */}
       <div ref={containerRef} className="w-full h-full relative z-10" />
 
-      {/* ── Neon Legend ── */}
-      <div className="absolute bottom-3 left-3 glass-strong rounded-xl p-3 text-xs space-y-2 pointer-events-none z-20 animate-border-glow">
+      {/* Interactive Path Trace Banner when a node/leaf is clicked */}
+      {selectedPathNodes && selectedPathNodes.length > 0 && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-[#0a1018]/95 border border-[#00ff88]/50 rounded-2xl px-4 py-2.5 z-30 shadow-[0_0_30px_rgba(0,255,136,0.3)] backdrop-blur-xl flex items-center space-x-3 max-w-xl animate-in fade-in">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#00ff88] bg-[#00ff88]/20 px-2 py-0.5 rounded whitespace-nowrap">
+            Leaf to Main Entity Path
+          </span>
+          <div className="flex items-center space-x-1.5 text-xs font-mono text-white overflow-x-auto py-0.5 scrollbar-none">
+            {selectedPathNodes.map((label, idx) => (
+              <React.Fragment key={idx}>
+                {idx > 0 && <ArrowRight className="w-3.5 h-3.5 text-[#00ff88] flex-shrink-0" />}
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] whitespace-nowrap ${
+                    idx === 0
+                      ? "bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/40 font-bold"
+                      : idx === selectedPathNodes.length - 1
+                      ? "bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/40 font-bold"
+                      : "bg-[#152233] text-[#e0e7ef] border border-[#1e3a50]"
+                  }`}
+                >
+                  {label}
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
+          <button
+            onClick={clearSelection}
+            className="p-1 hover:bg-[#152233] text-[#8ba3be] hover:text-white rounded-lg transition-colors cursor-pointer"
+            title="Reset Path Selection"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Target Title Badge (Top Left) */}
+      <div className="absolute top-16 left-4 bg-[#111827]/90 border border-[#1e293b] rounded-2xl px-4 py-2.5 z-20 shadow-xl backdrop-blur-md">
+        <div className="flex items-center space-x-2">
+          {isInvestigatorTarget ? (
+            <Shield className="w-4 h-4 text-[#3b82f6]" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 text-[#ef4444]" />
+          )}
+          <span className="text-xs font-bold text-white tracking-wide">
+            {isInvestigatorTarget ? "Investigative Work Network" : "Criminal Network Graph"}
+          </span>
+        </div>
+        {data.target && (
+          <p className="text-[11px] text-[#00ff88] font-mono mt-0.5">
+            Target: {data.target}
+          </p>
+        )}
+      </div>
+
+      {/* Neon Legend */}
+      <div className="absolute bottom-3 left-3 bg-[#0a1018]/90 border border-[#152233] rounded-xl p-3 text-xs space-y-2 pointer-events-none z-20 backdrop-blur-md shadow-xl">
         <p className="text-[10px] text-[#00ff88] font-semibold uppercase tracking-wider flex items-center space-x-1.5 mb-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#00ff88] status-live" />
-          <span>Network Legend</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-[#00ff88] animate-pulse" />
+          <span>Entity Legend (Click node to trace path)</span>
         </p>
         {Object.entries(NODE_COLORS).map(([type, color]) => (
           <div key={type} className="flex items-center gap-2">
@@ -226,8 +400,8 @@ export default function NetworkGraph({ data }: { data: any }) {
         ))}
       </div>
 
-      {/* ── Stats Badge ── */}
-      <div className="absolute top-3 right-3 glass rounded-xl px-3 py-2 text-xs text-[#8ba3be] pointer-events-none z-20 font-mono space-y-0.5 animate-border-glow">
+      {/* Stats Badge */}
+      <div className="absolute top-16 right-4 bg-[#0a1018]/90 border border-[#152233] rounded-xl px-3 py-2 text-xs text-[#8ba3be] pointer-events-none z-20 font-mono space-y-0.5 backdrop-blur-md shadow-xl">
         <div className="flex items-center space-x-2">
           <span className="text-[#4a6580]">NODES</span>
           <span className="text-[#00ff88] font-bold">{data.nodes.length}</span>
@@ -237,9 +411,6 @@ export default function NetworkGraph({ data }: { data: any }) {
           <span className="text-[#3b82f6] font-bold">{data.edges?.length ?? 0}</span>
         </div>
       </div>
-
-      {/* ── Scan Line ── */}
-      <div className="absolute inset-0 pointer-events-none z-[18] scan-line" />
     </div>
   );
 }

@@ -144,7 +144,7 @@ DEMO_USERS = [
 def run():
     conn = psycopg2.connect(
         host=os.environ.get("DB_HOST", "127.0.0.1"),
-        port=os.environ.get("DB_PORT", "5555"),
+        port=os.environ.get("DB_PORT", "5432"),
         dbname=os.environ.get("DB_NAME", "datathon_db"),
         user=os.environ.get("DB_USER", "datathon_user"),
         password=os.environ.get("DB_PASSWORD", "datathon_password"),

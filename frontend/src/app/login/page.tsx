@@ -16,7 +16,7 @@ export default function LoginPage() {
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
+
 
   useEffect(() => {
     setMounted(true);
@@ -34,19 +34,19 @@ export default function LoginPage() {
       let user = null;
 
       try {
-        const res = await axios.post(`${API_URL}/api/login`, {
+        const res = await axios.post(`/api/proxy/api/login`, {
           username: username.trim(),
           password: password,
         });
         access_token = res.data.access_token;
         user = res.data.user;
       } catch (axiosErr: any) {
-        // Fallback for CORS/preflight edge cases: form-urlencoded fetch (no preflight OPTIONS needed)
+        // Fallback: form-urlencoded (also goes through proxy, no CORS)
         const params = new URLSearchParams();
         params.append("username", username.trim());
         params.append("password", password);
 
-        const fetchRes = await fetch(`${API_URL}/api/login`, {
+        const fetchRes = await fetch(`/api/proxy/api/login`, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: params.toString(),

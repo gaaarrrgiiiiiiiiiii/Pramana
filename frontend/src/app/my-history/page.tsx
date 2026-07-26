@@ -62,18 +62,17 @@ export default function MyHistoryPage() {
   const [search, setSearch] = useState("");
   const router = useRouter();
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
+
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = localStorage.getItem("token") || "";
     const userStr = localStorage.getItem("user");
-    if (!token || !userStr) { router.push("/login"); return; }
+    if (!userStr) { router.push("/login"); return; }
     setCurrentUser(JSON.parse(userStr));
 
-    // Fetch personal sessions
     axios
-      .get(`${API_URL}/api/sessions`, {
-        headers: { Authorization: `Bearer ${token}` },
+      .get(`/api/proxy/api/sessions?token=${token}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       .then((res) => {
         const data: Session[] = res.data || [];
@@ -83,31 +82,30 @@ export default function MyHistoryPage() {
       })
       .catch(() => setLoading(false));
 
-    // Fetch personal activity log
     axios
-      .get(`${API_URL}/api/audit-log/me`, {
-        headers: { Authorization: `Bearer ${token}` },
+      .get(`/api/proxy/api/audit-log/me?token=${token}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       .then((res) => {
         setActivityLogs(res.data || []);
       })
       .catch(() => {});
-  }, [API_URL, router]);
+  }, [router]);
 
   useEffect(() => {
     if (!selectedSessionId) return;
-    const token = localStorage.getItem("token");
+    const token = localStorage.getItem("token") || "";
     setMessagesLoading(true);
     axios
-      .get(`${API_URL}/api/sessions/${selectedSessionId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      .get(`/api/proxy/api/sessions/${selectedSessionId}?token=${token}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       .then((res) => {
         setMessages(res.data.messages || []);
         setMessagesLoading(false);
       })
       .catch(() => setMessagesLoading(false));
-  }, [selectedSessionId, API_URL]);
+  }, [selectedSessionId]);
 
   const filteredSessions = useMemo(() => {
     return sessions.filter((s) =>

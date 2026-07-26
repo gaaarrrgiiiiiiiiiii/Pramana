@@ -121,7 +121,7 @@ export default function HotspotMap({ initialFilters }: HotspotMapProps = {}) {
   const [currentZoom, setCurrentZoom] = useState<number>(KARNATAKA_ZOOM);
   const [viewMode, setViewMode] = useState<"karnataka" | "india">("karnataka");
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
+
 
   const FALLBACK_CRIME_GROUPS = [
     "THEFT", "MURDER", "RAPE", "ASSAULT", "KIDNAPPING AND ABDUCTION",
@@ -152,7 +152,7 @@ export default function HotspotMap({ initialFilters }: HotspotMapProps = {}) {
 
   useEffect(() => {
     setMounted(true);
-    fetch(`${API_URL}/api/hotspots/filters`)
+    fetch(`/api/proxy/api/hotspots/filters`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         return res.json();
@@ -166,14 +166,14 @@ export default function HotspotMap({ initialFilters }: HotspotMapProps = {}) {
         setCrimeGroups(FALLBACK_CRIME_GROUPS);
         setDistricts(FALLBACK_DISTRICTS);
       });
-  }, [API_URL]);
+  }, []);
 
   const fetchHotspots = useCallback(() => {
     if (!mounted) return;
     setLoading(true);
     setFetchError(null);
 
-    let url = `${API_URL}/api/hotspots?limit=500`;
+    let url = `/api/proxy/api/hotspots?limit=500`;
     if (selectedGroup !== "All") url += `&crime_group=${encodeURIComponent(selectedGroup)}`;
     if (selectedDistrict !== "All") url += `&district=${encodeURIComponent(selectedDistrict)}`;
     if (selectedYear !== "All") url += `&year=${selectedYear}`;
@@ -197,12 +197,12 @@ export default function HotspotMap({ initialFilters }: HotspotMapProps = {}) {
         setLoading(false);
       })
       .catch((err) => {
-        const errorMsg = `Unable to load hotspot data from backend (${API_URL}). Please verify backend server is running.`;
+        const errorMsg = `Unable to load hotspot data. Please verify backend server is running.`;
         console.warn("Error fetching hotspots:", err.message || err);
         setFetchError(errorMsg);
         setLoading(false);
       });
-  }, [selectedGroup, selectedDistrict, selectedYear, mounted, API_URL]);
+  }, [selectedGroup, selectedDistrict, selectedYear, mounted]);
 
   useEffect(() => {
     fetchHotspots();

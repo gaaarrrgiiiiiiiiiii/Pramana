@@ -33,7 +33,7 @@ export default function DashboardPage() {
   const componentRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
+
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -60,7 +60,7 @@ export default function DashboardPage() {
   const fetchSessions = () => {
     const token = localStorage.getItem("token") || "";
     axios
-      .get(`${API_URL}/api/sessions?token=${token}`, {
+      .get(`/api/proxy/api/sessions?token=${token}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       .then((res) => {

@@ -69,7 +69,8 @@ export default function ChatInterface({
   const audioChunksRef = useRef<Blob[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
+  // All API calls go through /api/proxy/* (Next.js SSR proxy) to avoid CORS
+  const PROXY = "";
 
   const langMeta = SUPPORTED_LANGUAGES.find((l) => l.code === language);
   const nativeLabel = langMeta?.native ?? language;
@@ -89,12 +90,11 @@ export default function ChatInterface({
       return;
     }
 
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    const token = localStorage.getItem("token") || "";
     setIsSessionLoading(true);
     axios
-      .get(`${API_URL}/api/sessions/${activeSessionId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      .get(`${PROXY}/api/proxy/api/sessions/${activeSessionId}?token=${token}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       .then((res) => {
         const rawMsgs = res.data.messages || [];
@@ -121,7 +121,7 @@ export default function ChatInterface({
       .catch(() => {
         setIsSessionLoading(false);
       });
-  }, [activeSessionId, API_URL]);
+  }, [activeSessionId]);
 
   const getSpeechLangCode = (lang: string): string => {
     switch (lang.toLowerCase()) {
@@ -143,7 +143,7 @@ export default function ChatInterface({
       formData.append("audio", audioBlob, "recording.webm");
       formData.append("role", "Field Officer");
 
-      const res = await axios.post(`${API_URL}/voice-query`, formData, {
+      const res = await axios.post(`${PROXY}/api/proxy/voice-query`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
@@ -265,11 +265,11 @@ export default function ChatInterface({
     const msg = messages[msgIndex];
     if (!msg.messageId || msg.feedback !== null) return;
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("token") || "";
       await axios.post(
-        `${API_URL}/api/feedback`,
+        `/api/proxy/api/feedback?token=${token}`,
         { message_id: msg.messageId, feedback: value },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
       setMessages((prev) =>
         prev.map((m, i) => (i === msgIndex ? { ...m, feedback: value } : m))
@@ -299,14 +299,10 @@ export default function ChatInterface({
     setQuery("");
 
     try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        window.location.href = "/login";
-        return;
-      }
+      const token = localStorage.getItem("token") || "";
 
       const res = await axios.post(
-        `${API_URL}/api/query`,
+        `${PROXY}/api/proxy/api/query?token=${token}`,
         {
           query: currentQuery,
           language: language,
@@ -314,7 +310,7 @@ export default function ChatInterface({
           conversation_history: history,
           token: token,
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
 
       const data = res.data;

@@ -265,7 +265,7 @@ ROLE_RATE_LIMITS = {
     "Field Officer":"30/minute",
 }
 
-@app.post("/api/query", response_model=QueryResponse, tags=["Query"])
+@app.post("/api/query", tags=["Query"])
 @limiter.limit("60/minute")
 async def process_query(
     request: Request,

@@ -9,7 +9,6 @@ import time
 import uuid
 import concurrent.futures
 from fastapi import FastAPI, Depends, Header, Request, HTTPException, Response
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -42,38 +41,28 @@ app = FastAPI(title="Pramana — Karnataka Police Investigative Co-Pilot", versi
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-frontend_url = os.environ.get("FRONTEND_URL", "")
-allowed_origins = [
-    "https://pramana-ui-sshxrzdq.onslate.in",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000"
-]
-if frontend_url and frontend_url not in allowed_origins:
-    allowed_origins.append(frontend_url)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_origin_regex=r".*",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.options("/{full_path:path}", tags=["System"])
-async def options_route_handler(request: Request, full_path: str):
+# ── CORS: raw middleware stamps headers on EVERY response (preflight + errors) ──
+# We intentionally avoid CORSMiddleware to prevent conflicts with Zoho's ZGS
+# load balancer which intercepts OPTIONS before forwarding to uvicorn.
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "*")
-    req_headers = request.headers.get("access-control-request-headers", "*")
-    req_method = request.headers.get("access-control-request-method", "GET, POST, PUT, DELETE, OPTIONS")
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": origin if origin != "*" else "*",
-            "Access-Control-Allow-Methods": req_method if req_method else "*",
-            "Access-Control-Allow-Headers": req_headers if req_headers else "*",
-            "Access-Control-Allow-Credentials": "true",
-        }
-    )
+    cors_headers = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Requested-With, token, access_token",
+        "Access-Control-Max-Age": "86400",
+        "Vary": "Origin",
+    }
+    # Handle OPTIONS preflight immediately — no further processing needed
+    if request.method == "OPTIONS":
+        return Response(status_code=200, headers=cors_headers)
+    # For all other requests, let them proceed then stamp CORS on the response
+    response = await call_next(request)
+    for key, value in cors_headers.items():
+        response.headers[key] = value
+    return response
 
 # ── Router Registrations ──────────────────────────────────────────────────────
 app.include_router(auth_router)
@@ -147,12 +136,6 @@ def _log_activity(
         release_db_connection(conn)
     except Exception as exc:
         log.error("activity_log_write_failed", extra={"error": str(exc)})
-
-
-# ── Include routers ───────────────────────────────────────────────────────────
-app.include_router(audio_router, prefix="/api", tags=["Audio"])
-app.include_router(auth_router)
-app.include_router(hotspot_router)
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────

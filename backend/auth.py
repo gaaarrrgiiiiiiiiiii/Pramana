@@ -74,12 +74,12 @@ async def login(request: Request):
     password = ""
     try:
         body = await request.json()
-        username = str(body.get("username", "")).strip()
+        username = str(body.get("username", "")).strip().lower()
         password = str(body.get("password", ""))
     except Exception:
         try:
             form = await request.form()
-            username = str(form.get("username", "")).strip()
+            username = str(form.get("username", "")).strip().lower()
             password = str(form.get("password", ""))
         except Exception:
             pass
@@ -88,7 +88,7 @@ async def login(request: Request):
     if username and password:
         try:
             with get_db_cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+                cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
                 db_user = cur.fetchone()
                 if db_user and verify_password(password, db_user["password_hash"]):
                     user = db_user
@@ -97,11 +97,12 @@ async def login(request: Request):
 
     # Mock fallback for demo accounts if DB wasn't seeded yet or password mismatch
     if not user:
-        if username == "officer1" and password in ("pass123", "mock"):
+        clean_user = username.strip().lower()
+        if clean_user in ("officer1", "officer") and password in ("pass123", "mock"):
             user = {"id": 4, "username": "officer1", "full_name": "PSI Kavitha Reddy", "role": "Field Officer", "badge_number": "KA-PSI-201", "district": "Bengaluru"}
-        elif username == "inspector1" and password in ("pass123", "mock"):
+        elif clean_user in ("inspector1", "inspector") and password in ("pass123", "mock"):
             user = {"id": 2, "username": "inspector1", "full_name": "Insp. Priya Sharma", "role": "Inspector", "badge_number": "KA-INS-042", "district": "Bengaluru"}
-        elif username == "admin" and password in ("admin123", "mock"):
+        elif clean_user in ("admin", "dgp") and password in ("admin123", "mock"):
             user = {"id": 1, "username": "admin", "full_name": "Dr. Rajesh Kumar (DGP)", "role": "SCRB Analyst", "badge_number": "KA-DGP-001", "district": "All"}
     
     if not user:

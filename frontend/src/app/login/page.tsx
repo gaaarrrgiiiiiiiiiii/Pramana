@@ -33,8 +33,10 @@ export default function LoginPage() {
       process.env.NEXT_PUBLIC_API_URL ||
       "https://pramana-api-50044352049.development.catalystappsail.in";
 
+    const cleanUsername = username.trim().toLowerCase();
+
     const formBody = new URLSearchParams();
-    formBody.append("username", username.trim());
+    formBody.append("username", cleanUsername);
     formBody.append("password", password);
 
     let access_token = "";
@@ -65,7 +67,7 @@ export default function LoginPage() {
         const res2 = await fetch(`/api/proxy/api/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: username.trim(), password }),
+          body: JSON.stringify({ username: cleanUsername, password }),
         });
         const data2 = await res2.json();
         if (res2.ok && data2.access_token) {

@@ -78,10 +78,11 @@ async def login(request: Request):
         raw_body = await request.body()
         body_str = raw_body.decode("utf-8", errors="ignore")
         
+        clean_body = body_str.lstrip()
         # 1. Try JSON
-        if body_str.startswith("{") or body_str.startswith("["):
+        if clean_body.startswith("{") or clean_body.startswith("["):
             try:
-                data = json.loads(body_str)
+                data = json.loads(clean_body)
                 if isinstance(data, dict):
                     username = str(data.get("username", "")).strip().lower()
                     password = str(data.get("password", ""))

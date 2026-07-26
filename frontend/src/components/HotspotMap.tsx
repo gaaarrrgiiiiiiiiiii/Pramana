@@ -121,7 +121,7 @@ export default function HotspotMap({ initialFilters }: HotspotMapProps = {}) {
   const [currentZoom, setCurrentZoom] = useState<number>(KARNATAKA_ZOOM);
   const [viewMode, setViewMode] = useState<"karnataka" | "india">("karnataka");
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
 
   const FALLBACK_CRIME_GROUPS = [
     "THEFT", "MURDER", "RAPE", "ASSAULT", "KIDNAPPING AND ABDUCTION",

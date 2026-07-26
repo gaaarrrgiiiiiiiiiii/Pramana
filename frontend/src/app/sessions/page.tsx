@@ -69,7 +69,7 @@ export default function SessionsPage() {
   const [search, setSearch] = useState("");
   const [filterRole, setFilterRole] = useState("All");
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
 
   useEffect(() => {
     const token = localStorage.getItem("token");

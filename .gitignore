@@ -5,6 +5,7 @@ data/
 
 # Dependencies
 node_modules/
+backend/lib/
 /.pnp
 .pnp.js
 backend/venv/
@@ -26,6 +27,10 @@ ENV/
 .env.development
 .env.production
 backend/.env
+app-config.json
+backend/app-config.json
+.catalystrc
+frontend/cli-config.json
 
 # Python cache & compiled files
 __pycache__/

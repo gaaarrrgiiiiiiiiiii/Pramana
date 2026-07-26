@@ -3,7 +3,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from pydantic import BaseModel
 from psycopg2.extras import RealDictCursor
 from db import get_db_connection, get_db_cursor
@@ -54,22 +54,38 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     user: dict
 
-@router.post("/api/login", response_model=LoginResponse)
-def login(req: LoginRequest):
+@router.post("/api/login")
+@router.post("/api/auth/login")
+async def login(request: Request):
+    username = ""
+    password = ""
+    try:
+        body = await request.json()
+        username = str(body.get("username", "")).strip()
+        password = str(body.get("password", ""))
+    except Exception:
+        try:
+            form = await request.form()
+            username = str(form.get("username", "")).strip()
+            password = str(form.get("password", ""))
+        except Exception:
+            pass
+
     user = None
-    with get_db_cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("SELECT * FROM users WHERE username = %s", (req.username,))
-        db_user = cur.fetchone()
-        if db_user and verify_password(req.password, db_user["password_hash"]):
-            user = db_user
+    if username and password:
+        with get_db_cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+            db_user = cur.fetchone()
+            if db_user and verify_password(password, db_user["password_hash"]):
+                user = db_user
 
     # Mock fallback for demo accounts if DB wasn't seeded yet or password mismatch
     if not user:
-        if req.username == "officer1" and req.password in ("pass123", "mock"):
+        if username == "officer1" and password in ("pass123", "mock"):
             user = {"id": 4, "username": "officer1", "full_name": "PSI Kavitha Reddy", "role": "Field Officer", "badge_number": "KA-PSI-201", "district": "Bengaluru"}
-        elif req.username == "inspector1" and req.password in ("pass123", "mock"):
+        elif username == "inspector1" and password in ("pass123", "mock"):
             user = {"id": 2, "username": "inspector1", "full_name": "Insp. Priya Sharma", "role": "Inspector", "badge_number": "KA-INS-042", "district": "Bengaluru"}
-        elif req.username == "admin" and req.password in ("admin123", "mock"):
+        elif username == "admin" and password in ("admin123", "mock"):
             user = {"id": 1, "username": "admin", "full_name": "Dr. Rajesh Kumar (DGP)", "role": "SCRB Analyst", "badge_number": "KA-DGP-001", "district": "All"}
     
     if not user:

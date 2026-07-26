@@ -1,0 +1,14 @@
+{
+  "appsail": [
+    {
+      "source": "backend",
+      "name": "pramana-api"
+    }
+  ],
+  "slate": [
+    {
+      "source": "frontend",
+      "name": "pramana-ui"
+    }
+  ]
+}

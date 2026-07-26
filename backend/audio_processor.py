@@ -150,10 +150,11 @@ async def process_voice_query(
         token = create_access_token(token_payload)
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Pass to Agent Pipeline
+        # Pass to Agent Pipeline (dynamic port for local or AppSail runtime)
+        local_port = os.environ.get("X_ZOHO_CATALYST_LISTEN_PORT") or os.environ.get("PORT") or "8000"
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post(
-                "http://127.0.0.1:8000/api/query",
+                f"http://127.0.0.1:{local_port}/api/query",
                 json={"query": transcribed_text},
                 headers=headers
             )

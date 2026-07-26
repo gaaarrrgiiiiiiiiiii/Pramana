@@ -69,7 +69,7 @@ export default function ChatInterface({
   const audioChunksRef = useRef<Blob[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
 
   const langMeta = SUPPORTED_LANGUAGES.find((l) => l.code === language);
   const nativeLabel = langMeta?.native ?? language;

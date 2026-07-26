@@ -4,6 +4,8 @@ import datetime
 from faker import Faker
 import psycopg2
 from psycopg2.extras import execute_values
+from dotenv import load_dotenv
+load_dotenv()
 
 fake = Faker('en_IN')
 
@@ -15,8 +17,8 @@ DB_PARAMS = {
     'port': os.environ.get('DB_PORT', '5432')
 }
 
-NUM_CASES = 80000
-NUM_PERSONS = 40000
+NUM_CASES = 300
+NUM_PERSONS = 150
 
 # Karnataka specific data
 DISTRICTS = ['Bengaluru Urban', 'Bengaluru Rural', 'Mysuru', 'Dakshina Kannada', 'Belagavi', 'Hubballi-Dharwad', 'Mangaluru', 'Udupi']
@@ -216,24 +218,33 @@ def plant_patterns(cursor, persons, locations, stations, offenses):
 
     # PATTERN 5: Vehicle Theft Ring (5 people, 5 stations)
     print("  -> Planting Pattern 5: Vehicle Theft Ring")
-    ring_members = person_ids[200:205]
+    ring_members = person_ids[110:115]
     ring_locations = locations[30:35]
     for i in range(5):
         add_case(f"FIR-RING-{i}/2025", datetime.datetime(2025, 3, i+1), "Stolen SUV.", ring_locations[i][0], ring_locations[i][4], vt_offense_id, [(ring_members[i], 'accused')])
 
 def main():
     print("Connecting to DB...")
-    conn = psycopg2.connect(**DB_PARAMS)
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        conn = psycopg2.connect(db_url)
+    else:
+        conn = psycopg2.connect(**DB_PARAMS)
     cursor = conn.cursor()
     
-    # Clean DB
-    cursor.execute("TRUNCATE TABLE case_persons, cases, persons, locations, stations, offense_types RESTART IDENTITY CASCADE;")
+    # Clean & setup DB
+    cursor.execute("DROP TABLE IF EXISTS case_persons, cases, persons, locations, stations, offense_types CASCADE;")
+    conn.commit()
+    with open('schema.sql', 'r') as f:
+        cursor.execute(f.read())
+    conn.commit()
     
     stations, _ = generate_stations(cursor)
     locations = generate_locations(cursor, stations)
     offenses = generate_offenses(cursor)
     persons = generate_persons(cursor)
     generate_cases_and_roles(cursor, NUM_CASES, NUM_PERSONS, locations, offenses)
+    cursor.execute("SELECT setval('cases_id_seq', (SELECT COALESCE(MAX(id), 1) FROM cases));")
     
     plant_patterns(cursor, persons, locations, stations, offenses)
     

@@ -16,7 +16,7 @@ export default function LoginPage() {
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
 
   useEffect(() => {
     setMounted(true);
@@ -30,16 +30,40 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const res = await axios.post(`${API_URL}/api/login`, {
-        username: username.trim(),
-        password: password,
-      });
+      let access_token = "";
+      let user = null;
 
-      const { access_token, user } = res.data;
-      localStorage.setItem("token", access_token);
-      localStorage.setItem("user", JSON.stringify(user));
+      try {
+        const res = await axios.post(`${API_URL}/api/login`, {
+          username: username.trim(),
+          password: password,
+        });
+        access_token = res.data.access_token;
+        user = res.data.user;
+      } catch (axiosErr: any) {
+        // Fallback for CORS/preflight edge cases: form-urlencoded fetch (no preflight OPTIONS needed)
+        const params = new URLSearchParams();
+        params.append("username", username.trim());
+        params.append("password", password);
 
-      router.push("/dashboard");
+        const fetchRes = await fetch(`${API_URL}/api/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+        });
+        if (!fetchRes.ok) {
+          throw axiosErr;
+        }
+        const data = await fetchRes.json();
+        access_token = data.access_token;
+        user = data.user;
+      }
+
+      if (access_token && user) {
+        localStorage.setItem("token", access_token);
+        localStorage.setItem("user", JSON.stringify(user));
+        router.push("/dashboard");
+      }
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       const errorText = typeof detail === "string"

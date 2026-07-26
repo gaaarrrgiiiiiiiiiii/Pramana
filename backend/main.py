@@ -1,4 +1,10 @@
+import sys
 import os
+# AppSail: bundle deps in lib/, add to path
+_lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
+if os.path.isdir(_lib):
+    sys.path.insert(0, _lib)
+
 import time
 import uuid
 import concurrent.futures
@@ -36,13 +42,38 @@ app = FastAPI(title="Pramana — Karnataka Police Investigative Co-Pilot", versi
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.middleware("http")
+async def custom_cors_middleware(request: Request, call_next):
+    origin = request.headers.get("origin", "*")
+    if request.method == "OPTIONS":
+        response = Response(status_code=200)
+        response.headers["Access-Control-Allow-Origin"] = origin if origin != "*" else "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = origin if origin != "*" else "*"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
+@app.options("/{full_path:path}", tags=["System"])
+async def options_route_handler(request: Request, full_path: str):
+    origin = request.headers.get("origin", "*")
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": origin if origin != "*" else "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
+
+# ── Router Registrations ──────────────────────────────────────────────────────
+app.include_router(auth_router)
+app.include_router(audio_router)
+app.include_router(hotspot_router)
 
 # ── Activity logging middleware ───────────────────────────────────────────────
 @app.middleware("http")
@@ -163,7 +194,15 @@ async def health_check():
         status["db"] = f"ok ({t.elapsed}s)"
         log.info("health_check_db_ok", extra={"latency": t.elapsed})
     except Exception as e:
-        status["db"] = f"error: {str(e)[:80]}"
+        msg = str(e).replace('\n', ' ').strip()
+        if not msg and hasattr(e, 'pgerror') and e.pgerror:
+            msg = str(e.pgerror).replace('\n', ' ').strip()
+        if not msg and hasattr(e, 'diag') and e.diag and getattr(e.diag, 'message_primary', None):
+            msg = str(e.diag.message_primary).replace('\n', ' ').strip()
+        if not msg:
+            msg = repr(e)
+        err_type = type(e).__name__
+        status["db"] = f"error: {err_type}: {msg}"[:120]
         healthy = False
         log.error("health_check_db_failed", extra={"error": str(e)})
 
@@ -583,4 +622,10 @@ async def get_my_activity_log(
     except Exception as e:
         log.error("my_activity_log_read_failed", extra={"error": str(e)})
         raise HTTPException(status_code=500, detail="Could not read personal activity log")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("X_ZOHO_CATALYST_LISTEN_PORT") or os.environ.get("PORT") or 8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
 

@@ -72,10 +72,10 @@ export default function SessionsPage() {
 
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = localStorage.getItem("token") || "";
     const userStr = localStorage.getItem("user");
-    if (!token || !userStr) { window.location.href = "/login"; return; }
-    
+    if (!userStr) { window.location.href = "/login"; return; }
+
     const userObj = JSON.parse(userStr);
     setCurrentUser(userObj);
 
@@ -85,7 +85,6 @@ export default function SessionsPage() {
       return;
     }
 
-    const token = localStorage.getItem("token") || "";
     axios
       .get(`/api/proxy/api/sessions?token=${token}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},

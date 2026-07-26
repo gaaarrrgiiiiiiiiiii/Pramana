@@ -1,34 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "https://pramana-api-50044352049.development.catalystappsail.in";
+const BACKEND =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://pramana-api-50044352049.development.catalystappsail.in";
 
-// Proxy all methods to the backend - no CORS issues since this runs server-side
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { path: string[] } }
-) {
-  return proxyRequest(request, params.path, "POST");
+// Next.js 15: dynamic route params are now a Promise — must be awaited
+type RouteContext = { params: Promise<{ path: string[] }> };
+
+export async function GET(request: NextRequest, context: RouteContext) {
+  const { path } = await context.params;
+  return proxyRequest(request, path, "GET");
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { path: string[] } }
-) {
-  return proxyRequest(request, params.path, "GET");
+export async function POST(request: NextRequest, context: RouteContext) {
+  const { path } = await context.params;
+  return proxyRequest(request, path, "POST");
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { path: string[] } }
-) {
-  return proxyRequest(request, params.path, "DELETE");
+export async function PUT(request: NextRequest, context: RouteContext) {
+  const { path } = await context.params;
+  return proxyRequest(request, path, "PUT");
 }
 
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { path: string[] } }
-) {
-  return proxyRequest(request, params.path, "PUT");
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  const { path } = await context.params;
+  return proxyRequest(request, path, "DELETE");
+}
+
+export async function OPTIONS(request: NextRequest, context: RouteContext) {
+  const { path } = await context.params;
+  return proxyRequest(request, path, "OPTIONS");
 }
 
 async function proxyRequest(
@@ -41,15 +42,16 @@ async function proxyRequest(
   const url = `${BACKEND}${backendPath}${search}`;
 
   const authHeader = request.headers.get("authorization");
-  const forwardHeaders: HeadersInit = {
-    "Content-Type": request.headers.get("content-type") || "application/json",
-  };
+  const contentType =
+    request.headers.get("content-type") || "application/json";
+
+  const forwardHeaders: HeadersInit = { "Content-Type": contentType };
   if (authHeader) {
     forwardHeaders["Authorization"] = authHeader;
   }
 
   let body: BodyInit | undefined;
-  if (method !== "GET" && method !== "DELETE") {
+  if (method !== "GET" && method !== "DELETE" && method !== "OPTIONS") {
     body = await request.text();
   }
 

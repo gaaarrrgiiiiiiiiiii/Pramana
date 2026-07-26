@@ -70,19 +70,30 @@ class LoginResponse(BaseModel):
 @router.post("/api/login")
 @router.post("/api/auth/login")
 async def login(request: Request):
+    content_type = request.headers.get("content-type", "").lower()
     username = ""
     password = ""
-    try:
-        body = await request.json()
-        username = str(body.get("username", "")).strip().lower()
-        password = str(body.get("password", ""))
-    except Exception:
+
+    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
         try:
             form = await request.form()
             username = str(form.get("username", "")).strip().lower()
             password = str(form.get("password", ""))
         except Exception:
             pass
+    else:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                username = str(body.get("username", "")).strip().lower()
+                password = str(body.get("password", ""))
+        except Exception:
+            pass
+
+    if not username:
+        username = str(request.query_params.get("username", "")).strip().lower()
+        if not password:
+            password = str(request.query_params.get("password", ""))
 
     user = None
     if username and password:

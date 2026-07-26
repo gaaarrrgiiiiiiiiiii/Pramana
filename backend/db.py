@@ -1,4 +1,5 @@
 import os
+import urllib.parse
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
@@ -9,19 +10,29 @@ def get_db_connection():
     """
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
-        # Auto-encode unescaped '#' in password to '%23' to prevent URI fragment truncation
         if "#" in db_url and "%23" not in db_url:
             db_url = db_url.replace("#", "%23")
-        if "sslmode" not in db_url:
-            delim = "&" if "?" in db_url else "?"
-            db_url += f"{delim}sslmode=require&connect_timeout=10"
-        for attempt in range(3):
-            try:
-                conn = psycopg2.connect(db_url)
-                return conn
-            except Exception:
-                if attempt == 2:
-                    raise
+        try:
+            parsed = urllib.parse.urlparse(db_url)
+            user = urllib.parse.unquote(parsed.username) if parsed.username else ""
+            password = urllib.parse.unquote(parsed.password) if parsed.password else ""
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port or 5432
+            dbname = parsed.path.lstrip('/') or "postgres"
+
+            return psycopg2.connect(
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                dbname=dbname,
+                sslmode="require" if ("supabase" in host or port == 6543) else "prefer",
+                connect_timeout=10
+            )
+        except Exception:
+            pass
+
+        return psycopg2.connect(db_url)
     
     # Fallback for local dev env
     db_name = os.environ.get("DB_NAME", "datathon_db")

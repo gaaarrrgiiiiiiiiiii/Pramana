@@ -58,11 +58,10 @@ export default function DashboardPage() {
 
   // Fetch recent sessions for ChatGPT-style sidebar
   const fetchSessions = () => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    const token = localStorage.getItem("token") || "";
     axios
-      .get(`${API_URL}/api/sessions`, {
-        headers: { Authorization: `Bearer ${token}` },
+      .get(`${API_URL}/api/sessions?token=${token}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       .then((res) => {
         setSessions(res.data || []);

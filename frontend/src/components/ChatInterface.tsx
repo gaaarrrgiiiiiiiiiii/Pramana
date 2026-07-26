@@ -312,6 +312,7 @@ export default function ChatInterface({
           language: language,
           session_id: sessionId,
           conversation_history: history,
+          token: token,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );

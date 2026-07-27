@@ -5,6 +5,11 @@
  *   1. Direct backend URL with token in query param — simple CORS request for GET,
  *      no OPTIONS preflight, hits AppSail directly.
  *   2. Fall back to /api/proxy/* (Next.js SSR proxy) if direct backend fetch fails.
+ *
+ * CRITICAL: Do NOT send Content-Type header on GET requests.
+ * Zoho ZGS gateway intercepts OPTIONS preflight and strips CORS headers,
+ * causing the browser to block any request that triggers a preflight.
+ * GET requests without Content-Type are "simple requests" — no preflight needed.
  */
 
 const BACKEND =
@@ -27,10 +32,14 @@ export async function apiFetch(
   const separator = path.includes("?") ? "&" : "?";
   const tokenParam = token ? `${separator}token=${encodeURIComponent(token)}` : "";
 
+  // For GET requests: send NO Content-Type header.
+  // This keeps it a CORS "simple request" — no preflight OPTIONS — bypassing ZGS interception.
+  // For POST/PUT/PATCH etc: Content-Type is required.
+  const isGet = method.toUpperCase() === "GET";
+
   // --- Strategy 1: Direct backend with token in query param ---
-  // GET with query param is a "simple request" — no CORS preflight needed
   try {
-    const directHeaders: HeadersInit = { "Content-Type": contentType };
+    const directHeaders: HeadersInit = isGet ? {} : { "Content-Type": contentType };
     const url = `${BACKEND}${path}${tokenParam}`;
     const r1 = await fetch(url, {
       method,
@@ -51,7 +60,7 @@ export async function apiFetch(
 
   // --- Strategy 2: Next.js SSR proxy fallback ---
   try {
-    const headers: HeadersInit = { "Content-Type": contentType };
+    const headers: HeadersInit = isGet ? {} : { "Content-Type": contentType };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const r2 = await fetch(`/api/proxy${path}${tokenParam}`, {
@@ -72,3 +81,4 @@ export async function apiFetch(
     return { ok: false, status: 0, data: {} };
   }
 }
+

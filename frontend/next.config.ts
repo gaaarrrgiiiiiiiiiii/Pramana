@@ -1,11 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // SSR mode (no static export) — required for /api/proxy/* routes that
-  // forward requests server-side to the backend (avoids browser CORS).
-  // Catalyst Slate runs "npm run dev" which starts Node.js — SSR is supported.
   images: {
     unoptimized: true,
+  },
+  async rewrites() {
+    return [
+      {
+        source: "/api/proxy/:path*",
+        destination: "https://pramana-api-50044352049.development.catalystappsail.in/:path*",
+      },
+    ];
   },
 };
 

@@ -306,29 +306,27 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Direct POST with text/plain (CORS safelisted Simple Request — NEVER triggers OPTIONS preflight)
+      // Strategy 1: Next.js SSR Proxy (Same-origin request — NEVER triggers browser CORS or OPTIONS preflight)
       try {
-        const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain" },
-          body: JSON.stringify({
+        const proxyRes = await axios.post(
+          `/api/proxy/api/query?token=${token}`,
+          {
             query: currentQuery,
             language: language,
             session_id: sessionId,
             conversation_history: history,
-          }),
-        });
-        if (directRes.ok) {
-          const json = await directRes.json();
-          if (json && json.answer_english) {
-            data = json;
-          }
+            token: token,
+          },
+          { headers: token ? { Authorization: `Bearer ${token}` } : {}, timeout: 15000 }
+        );
+        if (proxyRes.data && proxyRes.data.answer_english) {
+          data = proxyRes.data;
         }
       } catch {
-        // Direct text/plain failed — fall through to application/json
+        // Proxy not available — fall through to direct backend query
       }
 
-      // Strategy 2: Direct backend POST with application/json
+      // Strategy 2: Direct backend POST query fallback
       if (!data) {
         try {
           const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
@@ -349,28 +347,6 @@ export default function ChatInterface({
           }
         } catch {
           // Direct POST failed
-        }
-      }
-
-      // Strategy 3: Try SSR Proxy
-      if (!data) {
-        try {
-          const proxyRes = await axios.post(
-            `/api/proxy/api/query?token=${token}`,
-            {
-              query: currentQuery,
-              language: language,
-              session_id: sessionId,
-              conversation_history: history,
-              token: token,
-            },
-            { headers: token ? { Authorization: `Bearer ${token}` } : {}, timeout: 10000 }
-          );
-          if (proxyRes.data && proxyRes.data.answer_english) {
-            data = proxyRes.data;
-          }
-        } catch {
-          // Proxy not available
         }
       }
 

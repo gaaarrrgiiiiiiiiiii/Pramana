@@ -306,21 +306,29 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Direct GET request (Simple request — NEVER triggers CORS OPTIONS preflight, bypasses ZGS load balancer)
+      // Strategy 1: Direct POST with text/plain (CORS safelisted Simple Request — NEVER triggers OPTIONS preflight)
       try {
-        const getUrl = `${API_URL}/api/query?query=${encodeURIComponent(currentQuery)}&language=${encodeURIComponent(language)}${sessionId ? `&session_id=${sessionId}` : ""}&token=${encodeURIComponent(token)}`;
-        const getRes = await fetch(getUrl, { method: "GET" });
-        if (getRes.ok) {
-          const json = await getRes.json();
+        const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify({
+            query: currentQuery,
+            language: language,
+            session_id: sessionId,
+            conversation_history: history,
+          }),
+        });
+        if (directRes.ok) {
+          const json = await directRes.json();
           if (json && json.answer_english) {
             data = json;
           }
         }
       } catch {
-        // GET failed — fall through to direct POST
+        // Direct text/plain failed — fall through to application/json
       }
 
-      // Strategy 2: Direct backend POST query
+      // Strategy 2: Direct backend POST with application/json
       if (!data) {
         try {
           const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {

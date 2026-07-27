@@ -277,12 +277,7 @@ ROLE_RATE_LIMITS = {
     "Field Officer":"30/minute",
 }
 
-@app.api_route(
-    "/api/query",
-    methods=["GET", "POST"],
-    tags=["Query"],
-    openapi_extra={"requestBody": {"content": {"*/*": {}}}}
-)
+@app.api_route("/api/query", methods=["POST"], tags=["Query"])
 @limiter.limit("60/minute")
 async def process_query(
     request: Request,
@@ -296,12 +291,12 @@ async def process_query(
 
     try:
         raw_body = await request.body()
-        body_str = raw_body.decode("utf-8", errors="ignore")
-        clean_body = body_str.lstrip()
+        body_str = raw_body.decode("utf-8", errors="ignore").strip()
 
-        if clean_body.startswith("{") or clean_body.startswith("["):
+        # 1. Try parsing JSON directly from raw body string
+        if body_str:
             try:
-                bjson = json.loads(clean_body)
+                bjson = json.loads(body_str)
                 if isinstance(bjson, dict):
                     q_text = str(bjson.get("query", "")).strip()
                     q_lang = str(bjson.get("language", "English"))
@@ -310,6 +305,7 @@ async def process_query(
             except Exception:
                 pass
 
+        # 2. Try parsing form-urlencoded
         if not q_text and body_str:
             try:
                 parsed = urllib.parse.parse_qs(body_str)
@@ -328,6 +324,7 @@ async def process_query(
     except Exception:
         pass
 
+    # 3. Try query parameters
     if not q_text:
         q_text = str(request.query_params.get("query", "")).strip()
         q_lang = str(request.query_params.get("language", "English"))

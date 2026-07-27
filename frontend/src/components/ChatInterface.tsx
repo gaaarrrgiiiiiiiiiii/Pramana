@@ -306,51 +306,9 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Try SSR Proxy
+      // Strategy 1: Direct backend JSON query (Fast, returns 200 OK with Gemini LLM response)
       try {
-        const proxyRes = await axios.post(
-          `/api/proxy/api/query?token=${token}`,
-          {
-            query: currentQuery,
-            language: language,
-            session_id: sessionId,
-            conversation_history: history,
-            token: token,
-          },
-          { headers: token ? { Authorization: `Bearer ${token}` } : {}, timeout: 10000 }
-        );
-        if (proxyRes.data && proxyRes.data.answer_english) {
-          data = proxyRes.data;
-        }
-      } catch {
-        // Proxy not available or failed — fall through to direct Strategy 2
-      }
-
-      // Strategy 2: Direct backend URL with form-urlencoded (simple request = no CORS preflight)
-      if (!data) {
-        const formParams = new URLSearchParams();
-        formParams.append("query", currentQuery);
-        formParams.append("language", language);
-        if (sessionId) formParams.append("session_id", String(sessionId));
-        if (token) formParams.append("token", token);
-        if (history.length > 0) formParams.append("conversation_history", JSON.stringify(history));
-
         const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: formParams.toString(),
-        });
-        if (directRes.ok) {
-          const json = await directRes.json();
-          if (json && (json.answer_english || json.detail)) {
-            data = json;
-          }
-        }
-      }
-
-      // Strategy 3: Direct backend with JSON fallback
-      if (!data) {
-        const jsonRes = await fetch(`${API_URL}/api/query?token=${token}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -360,8 +318,35 @@ export default function ChatInterface({
             conversation_history: history,
           }),
         });
-        if (jsonRes.ok) {
-          data = await jsonRes.json();
+        if (directRes.ok) {
+          const json = await directRes.json();
+          if (json && json.answer_english) {
+            data = json;
+          }
+        }
+      } catch {
+        // Direct query failed — fall through to SSR Proxy Strategy 2
+      }
+
+      // Strategy 2: Try SSR Proxy
+      if (!data) {
+        try {
+          const proxyRes = await axios.post(
+            `/api/proxy/api/query?token=${token}`,
+            {
+              query: currentQuery,
+              language: language,
+              session_id: sessionId,
+              conversation_history: history,
+              token: token,
+            },
+            { headers: token ? { Authorization: `Bearer ${token}` } : {}, timeout: 10000 }
+          );
+          if (proxyRes.data && proxyRes.data.answer_english) {
+            data = proxyRes.data;
+          }
+        } catch {
+          // Proxy not available
         }
       }
 

@@ -324,6 +324,15 @@ async def process_query(
         conversation_history=q_hist
     )
 
+    if not req.query:
+        return QueryResponse(
+            answer_english="Please ask a question about FIRs, crime trends, or officer investigations.",
+            answer_translated="ದಯವಿಟ್ಟು ಎಫ್‌ಐಆರ್‌ಗಳು, ಅಪರಾಧ ಪ್ರವೃತ್ತಿಗಳು ಅಥವಾ ತನಿಖೆಗಳ ಬಗ್ಗೆ ಪ್ರಶ್ನೆ ಕೇಳಿ.",
+            language=req.language, confidence=1.0,
+            intent="conversational", audit_trail=["Empty query received."], raw_data={},
+            session_id=req.session_id
+        )
+
     t_start = time.perf_counter()
     request_id = getattr(request.state, "request_id", new_request_id())
     audit_trail: list[str] = []

@@ -31,14 +31,6 @@ async def get_current_user(request: Request, authorization: str = Header(None)):
     
     if not token:
         token = request.query_params.get("token") or request.query_params.get("access_token")
-    
-    if not token:
-        try:
-            body = await request.json()
-            if isinstance(body, dict):
-                token = body.get("token") or body.get("access_token")
-        except Exception:
-            pass
 
     if token:
         try:

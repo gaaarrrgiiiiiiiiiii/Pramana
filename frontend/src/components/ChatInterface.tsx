@@ -331,7 +331,10 @@ export default function ChatInterface({
         try {
           const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+            },
             body: JSON.stringify({
               query: currentQuery,
               language: language,

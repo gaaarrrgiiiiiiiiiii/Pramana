@@ -319,10 +319,24 @@ async def process_query(
     except Exception:
         pass
 
-    # 3. Try query parameters
+    # 3. Try query parameters (handles GET requests and POST with token in URL)
     if not q_text:
         q_text = str(request.query_params.get("query", "")).strip()
         q_lang = str(request.query_params.get("language", "English"))
+        if not q_sid:
+            try:
+                sid_str = request.query_params.get("session_id", "")
+                if sid_str:
+                    q_sid = int(sid_str)
+            except (ValueError, TypeError):
+                pass
+        if not q_hist:
+            try:
+                hist_str = request.query_params.get("conversation_history", "")
+                if hist_str:
+                    q_hist = json.loads(hist_str)
+            except Exception:
+                pass
 
     req = QueryRequest(
         query=q_text,

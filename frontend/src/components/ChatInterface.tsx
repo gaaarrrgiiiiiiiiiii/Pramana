@@ -306,20 +306,19 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Direct backend POST — CORS-safe simple request (no preflight)
-      // ZGS load balancer intercepts OPTIONS; avoid by using text/plain + token in URL
+      // Strategy 1: Direct backend GET with query params — CORS-safe simple request (no preflight ever)
+      // ZGS load balancer intercepts OPTIONS; GET requests are always simple and never trigger preflight
       try {
-        const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "text/plain",
-          },
-          body: JSON.stringify({
-            query: currentQuery,
-            language: language,
-            session_id: sessionId,
-            conversation_history: history,
-          }),
+        const params = new URLSearchParams({
+          query: currentQuery,
+          language: language,
+          token: token,
+        });
+        if (sessionId) params.append("session_id", String(sessionId));
+        if (history.length > 0) params.append("conversation_history", JSON.stringify(history));
+
+        const directRes = await fetch(`${API_URL}/api/query?${params.toString()}`, {
+          method: "GET",
         });
         if (directRes.ok) {
           const json = await directRes.json();
@@ -328,7 +327,7 @@ export default function ChatInterface({
           }
         }
       } catch {
-        // Direct POST failed — fall through to proxy
+        // Direct GET failed — fall through to proxy
       }
 
       // Strategy 2: Next.js SSR proxy fallback (if available)

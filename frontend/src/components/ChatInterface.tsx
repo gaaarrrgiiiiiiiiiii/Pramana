@@ -306,48 +306,83 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Direct backend GET with query params — CORS-safe simple request (no preflight ever)
-      // ZGS load balancer intercepts OPTIONS; GET requests are always simple and never trigger preflight
+      // Strategy 1: Next.js SSR Proxy POST — no CORS at all (same-origin server-side fetch)
+      // This is the primary strategy and most reliable. route.ts has 55s timeout for LLM calls.
       try {
-        const params = new URLSearchParams({
-          query: currentQuery,
-          language: language,
-          token: token,
-        });
-        if (sessionId) params.append("session_id", String(sessionId));
-        if (history.length > 0) params.append("conversation_history", JSON.stringify(history));
-
-        const directRes = await fetch(`${API_URL}/api/query?${params.toString()}`, {
-          method: "GET",
-        });
-        if (directRes.ok) {
-          const json = await directRes.json();
-          if (json && json.answer_english) {
-            data = json;
+        const proxyRes = await axios.post(
+          `/api/proxy/api/query?token=${token}`,
+          {
+            query: currentQuery,
+            language: language,
+            session_id: sessionId,
+            conversation_history: history,
+          },
+          {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            timeout: 50000, // 50s — LLM calls can take 20-30s
           }
+        );
+        if (proxyRes.data && proxyRes.data.answer_english) {
+          data = proxyRes.data;
+        } else if (proxyRes.data && proxyRes.data.detail) {
+          // Proxy returned an error detail — propagate it
+          throw new Error(proxyRes.data.detail);
         }
-      } catch {
-        // Direct GET failed — fall through to proxy
+      } catch (e1: any) {
+        // 401 → redirect to login immediately
+        if (e1?.response?.status === 401) throw e1;
+        console.warn("[query] Strategy 1 proxy failed:", e1?.message || e1);
       }
 
-      // Strategy 2: Next.js SSR proxy fallback (if available)
+      // Strategy 2: Direct backend GET with query params — CORS-safe simple request
+      // GET is always a simple CORS request (no OPTIONS preflight). Works once GET is deployed.
       if (!data) {
         try {
-          const proxyRes = await axios.post(
-            `/api/proxy/api/query?token=${token}`,
-            {
-              query: currentQuery,
-              language: language,
-              session_id: sessionId,
-              conversation_history: history,
-            },
-            { timeout: 12000 }
+          const params = new URLSearchParams({
+            query: currentQuery,
+            language: language,
+            token: token,
+          });
+          if (sessionId) params.append("session_id", String(sessionId));
+          if (history.length > 0)
+            params.append("conversation_history", JSON.stringify(history));
+
+          const getRes = await fetch(
+            `${API_URL}/api/query?${params.toString()}`,
+            { method: "GET" }
           );
-          if (proxyRes.data && proxyRes.data.answer_english) {
-            data = proxyRes.data;
+          if (getRes.ok) {
+            const json = await getRes.json();
+            if (json && json.answer_english) data = json;
           }
-        } catch {
-          // Proxy not available
+        } catch (e2: any) {
+          console.warn("[query] Strategy 2 GET failed:", e2?.message || e2);
+        }
+      }
+
+      // Strategy 3: Direct POST with JSON — works if browser CORS allows it
+      // (Requires ZGS OPTIONS to forward properly — may not work in all environments)
+      if (!data) {
+        try {
+          const postRes = await fetch(
+            `${API_URL}/api/query?token=${token}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                query: currentQuery,
+                language: language,
+                session_id: sessionId,
+                conversation_history: history,
+              }),
+            }
+          );
+          if (postRes.ok) {
+            const json = await postRes.json();
+            if (json && json.answer_english) data = json;
+          }
+        } catch (e3: any) {
+          console.warn("[query] Strategy 3 direct POST failed:", e3?.message || e3);
         }
       }
 
@@ -376,7 +411,7 @@ export default function ChatInterface({
           { query: currentQuery, answer_english: data.answer_english },
         ]);
       } else {
-        const errMsg = data?.detail || "Could not retrieve query response. Please check backend status.";
+        const errMsg = data?.detail || "Could not retrieve a response. The AI agents are warming up — please try again in a moment.";
         setMessages((prev) => [...prev, { role: "agent", text: errMsg }]);
         onQueryComplete(null);
       }
@@ -393,7 +428,7 @@ export default function ChatInterface({
           ? detail.map((d: any) => d.msg || d.type || JSON.stringify(d)).join("; ")
           : typeof detail === "object" && detail !== null
           ? JSON.stringify(detail)
-          : "Network Error: Could not reach backend server.";
+          : err?.message || "Network Error: Could not reach backend server.";
 
       setMessages((prev) => [...prev, { role: "agent", text: errorText }]);
       onQueryComplete(null);

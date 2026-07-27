@@ -2,9 +2,9 @@
  * apiFetch — works in BOTH static export and SSR proxy deployments.
  *
  * Strategy:
- *   1. Try /api/proxy/* (Next.js SSR proxy) — works when SSR build is deployed
- *   2. Fall back to direct backend URL with token in query param — works in static build
- *      (GET with query param = simple request = no CORS preflight)
+ *   1. Direct backend URL with token in query param — simple CORS request for GET,
+ *      no OPTIONS preflight, hits AppSail directly.
+ *   2. Fall back to /api/proxy/* (Next.js SSR proxy) if direct backend fetch fails.
  */
 
 const BACKEND =
@@ -24,42 +24,51 @@ export async function apiFetch(
 ): Promise<{ ok: boolean; status: number; data: any }> {
   const { method = "GET", body, contentType = "application/json", token = "" } = options;
 
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
+  const separator = path.includes("?") ? "&" : "?";
+  const tokenParam = token ? `${separator}token=${encodeURIComponent(token)}` : "";
 
-  // --- Strategy 1: Next.js SSR proxy (no CORS issues at all) ---
+  // --- Strategy 1: Direct backend with token in query param ---
+  // GET with query param is a "simple request" — no CORS preflight needed
+  try {
+    const directHeaders: HeadersInit = { "Content-Type": contentType };
+    const url = `${BACKEND}${path}${tokenParam}`;
+    const r1 = await fetch(url, {
+      method,
+      headers: directHeaders,
+      body: body || undefined,
+      cache: "no-store",
+    });
+
+    if (r1.ok) {
+      const data = await r1.json().catch(() => null);
+      if (data !== null) {
+        return { ok: true, status: r1.status, data };
+      }
+    }
+  } catch {
+    // direct fetch failed — fall through to proxy
+  }
+
+  // --- Strategy 2: Next.js SSR proxy fallback ---
   try {
     const headers: HeadersInit = { "Content-Type": contentType };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const r = await fetch(`/api/proxy${path}${tokenParam}`, {
+    const r2 = await fetch(`/api/proxy${path}${tokenParam}`, {
       method,
       headers,
       body: body || undefined,
       cache: "no-store",
     });
 
-    // If the proxy responds (even 4xx/5xx), use it
-    if (r.status !== 404 && r.status !== 502 && r.status !== 503) {
-      const data = await r.json().catch(() => ({}));
-      return { ok: r.ok, status: r.status, data };
+    if (r2.ok) {
+      const data2 = await r2.json().catch(() => null);
+      if (data2 !== null) {
+        return { ok: true, status: r2.status, data: data2 };
+      }
     }
+    return { ok: r2.ok, status: r2.status, data: {} };
   } catch {
-    // proxy not available — fall through to direct
+    return { ok: false, status: 0, data: {} };
   }
-
-  // --- Strategy 2: Direct backend with token in query param ---
-  // GET with query param is a "simple request" — no CORS preflight needed
-  const directHeaders: HeadersInit = { "Content-Type": contentType };
-  // DON'T send Authorization header for GET (that triggers a preflight)
-  // token is sent via ?token= query param — the backend accepts both
-
-  const url = `${BACKEND}${path}${tokenParam}`;
-  const r2 = await fetch(url, {
-    method,
-    headers: directHeaders,
-    body: body || undefined,
-    cache: "no-store",
-  });
-  const data2 = await r2.json().catch(() => ({}));
-  return { ok: r2.ok, status: r2.status, data: data2 };
 }

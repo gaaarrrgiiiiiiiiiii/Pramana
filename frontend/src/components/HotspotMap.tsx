@@ -5,6 +5,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { Crosshair, Radio, Satellite, Globe, MapPin, ChevronDown, ChevronUp, Layers, Flame, ShieldAlert } from "lucide-react";
+import { apiFetch } from "@/lib/apiFetch";
 
 // Dynamically import Leaflet components to avoid SSR errors
 const MapContainer = dynamic(
@@ -152,14 +153,16 @@ export default function HotspotMap({ initialFilters }: HotspotMapProps = {}) {
 
   useEffect(() => {
     setMounted(true);
-    fetch(`/api/proxy/api/hotspots/filters`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        return res.json();
-      })
-      .then((data) => {
-        setCrimeGroups(data.crime_groups && data.crime_groups.length > 0 ? data.crime_groups : FALLBACK_CRIME_GROUPS);
-        setDistricts(data.districts && data.districts.length > 0 ? data.districts : FALLBACK_DISTRICTS);
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") || "" : "";
+    apiFetch("/api/hotspots/filters", { token })
+      .then(({ ok, data }) => {
+        if (ok && data && (data.crime_groups || data.districts)) {
+          setCrimeGroups(data.crime_groups && data.crime_groups.length > 0 ? data.crime_groups : FALLBACK_CRIME_GROUPS);
+          setDistricts(data.districts && data.districts.length > 0 ? data.districts : FALLBACK_DISTRICTS);
+        } else {
+          setCrimeGroups(FALLBACK_CRIME_GROUPS);
+          setDistricts(FALLBACK_DISTRICTS);
+        }
       })
       .catch((err) => {
         console.warn("Could not connect to hotspot filters backend, using standard filters:", err.message || err);
@@ -173,28 +176,31 @@ export default function HotspotMap({ initialFilters }: HotspotMapProps = {}) {
     setLoading(true);
     setFetchError(null);
 
-    let url = `/api/proxy/api/hotspots?limit=500`;
-    if (selectedGroup !== "All") url += `&crime_group=${encodeURIComponent(selectedGroup)}`;
-    if (selectedDistrict !== "All") url += `&district=${encodeURIComponent(selectedDistrict)}`;
-    if (selectedYear !== "All") url += `&year=${selectedYear}`;
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") || "" : "";
+    let path = `/api/hotspots?limit=500`;
+    if (selectedGroup !== "All") path += `&crime_group=${encodeURIComponent(selectedGroup)}`;
+    if (selectedDistrict !== "All") path += `&district=${encodeURIComponent(selectedDistrict)}`;
+    if (selectedYear !== "All") path += `&year=${selectedYear}`;
 
-    fetch(url)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        return res.json();
-      })
-      .then((data) => {
-        const raw: HotspotFeature[] = data.features || [];
-        const valid = raw.filter((f) => {
-          const [lng, lat] = f.geometry.coordinates;
-          return (
-            lat >= 11.0 && lat <= 19.0 &&
-            lng >= 74.0 && lng <= 79.0
-          );
-        });
-        setFeatures(valid);
-        setTotalCount(data.count || raw.length);
-        setLoading(false);
+    apiFetch(path, { token })
+      .then(({ ok, data }) => {
+        if (ok && data && Array.isArray(data.features)) {
+          const raw: HotspotFeature[] = data.features;
+          const valid = raw.filter((f) => {
+            const [lng, lat] = f.geometry.coordinates;
+            return (
+              lat >= 11.0 && lat <= 19.0 &&
+              lng >= 74.0 && lng <= 79.0
+            );
+          });
+          setFeatures(valid);
+          setTotalCount(data.count || raw.length);
+          setLoading(false);
+        } else {
+          const errorMsg = `Unable to load hotspot data. Please verify backend server is running.`;
+          setFetchError(errorMsg);
+          setLoading(false);
+        }
       })
       .catch((err) => {
         const errorMsg = `Unable to load hotspot data. Please verify backend server is running.`;

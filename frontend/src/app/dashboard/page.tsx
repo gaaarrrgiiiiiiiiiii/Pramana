@@ -14,6 +14,7 @@ import { PrintableReport } from "@/components/PrintableReport";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import axios from "axios";
+import { apiFetch } from "@/lib/apiFetch";
 
 interface SessionItem {
   id: number;
@@ -55,16 +56,14 @@ export default function DashboardPage() {
       }
     }
   }, []);
-
   // Fetch recent sessions for ChatGPT-style sidebar
   const fetchSessions = () => {
     const token = localStorage.getItem("token") || "";
-    axios
-      .get(`/api/proxy/api/sessions?token=${token}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((res) => {
-        setSessions(res.data || []);
+    apiFetch("/api/sessions", { token })
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) {
+          setSessions(data);
+        }
       })
       .catch(() => {});
   };

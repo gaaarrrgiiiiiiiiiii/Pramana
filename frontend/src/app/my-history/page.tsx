@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import axios from "axios";
+import { apiFetch } from "@/lib/apiFetch";
 
 interface Session {
   id: number;
@@ -70,24 +71,20 @@ export default function MyHistoryPage() {
     if (!userStr) { router.push("/login"); return; }
     setCurrentUser(JSON.parse(userStr));
 
-    axios
-      .get(`/api/proxy/api/sessions?token=${token}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((res) => {
-        const data: Session[] = res.data || [];
-        setSessions(data);
-        if (data.length > 0) setSelectedSessionId(data[0].id);
+    apiFetch("/api/sessions", { token })
+      .then(({ ok, data }) => {
+        const sessionList: Session[] = ok && Array.isArray(data) ? data : [];
+        setSessions(sessionList);
+        if (sessionList.length > 0) setSelectedSessionId(sessionList[0].id);
         setLoading(false);
       })
       .catch(() => setLoading(false));
 
-    axios
-      .get(`/api/proxy/api/audit-log/me?token=${token}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((res) => {
-        setActivityLogs(res.data || []);
+    apiFetch("/api/audit-log/me", { token })
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) {
+          setActivityLogs(data);
+        }
       })
       .catch(() => {});
   }, [router]);
@@ -96,12 +93,11 @@ export default function MyHistoryPage() {
     if (!selectedSessionId) return;
     const token = localStorage.getItem("token") || "";
     setMessagesLoading(true);
-    axios
-      .get(`/api/proxy/api/sessions/${selectedSessionId}?token=${token}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((res) => {
-        setMessages(res.data.messages || []);
+    apiFetch(`/api/sessions/${selectedSessionId}`, { token })
+      .then(({ ok, data }) => {
+        if (ok && data) {
+          setMessages(data.messages || []);
+        }
         setMessagesLoading(false);
       })
       .catch(() => setMessagesLoading(false));

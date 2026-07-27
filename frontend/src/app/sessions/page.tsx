@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
+import { apiFetch } from "@/lib/apiFetch";
 
 interface Session {
   id: number;
@@ -85,14 +86,11 @@ export default function SessionsPage() {
       return;
     }
 
-    axios
-      .get(`/api/proxy/api/sessions?token=${token}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((res) => {
-        const data: Session[] = res.data || [];
-        setSessions(data);
-        if (data.length > 0) setSelectedSessionId(data[0].id);
+    apiFetch("/api/sessions", { token })
+      .then(({ ok, data }) => {
+        const sessionList: Session[] = ok && Array.isArray(data) ? data : [];
+        setSessions(sessionList);
+        if (sessionList.length > 0) setSelectedSessionId(sessionList[0].id);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -102,12 +100,11 @@ export default function SessionsPage() {
     if (!selectedSessionId) return;
     const token = localStorage.getItem("token") || "";
     setMessagesLoading(true);
-    axios
-      .get(`/api/proxy/api/sessions/${selectedSessionId}?token=${token}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((res) => {
-        setMessages(res.data.messages || []);
+    apiFetch(`/api/sessions/${selectedSessionId}`, { token })
+      .then(({ ok, data }) => {
+        if (ok && data) {
+          setMessages(data.messages || []);
+        }
         setMessagesLoading(false);
       })
       .catch(() => setMessagesLoading(false));

@@ -306,56 +306,54 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Dedicated Next.js /api/query route (same-origin, NO CORS, NO Brotli issue)
-      // This server-side route calls the backend with Accept-Encoding: identity to avoid
-      // the Brotli decompression bug in Slate's reverse proxy layer.
+      // Strategy 1: Direct backend GET with query params — CORS-safe simple request
+      // GET requests are simple requests in browsers: NO OPTIONS preflight is ever sent by the browser.
       try {
-        const proxyRes = await axios.post(
-          `/api/query`,
-          {
-            query: currentQuery,
-            language: language,
-            session_id: sessionId,
-            conversation_history: history,
-          },
-          {
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-            timeout: 55000,
-          }
+        const params = new URLSearchParams({
+          query: currentQuery,
+          language: language,
+          token: token,
+        });
+        if (sessionId) params.append("session_id", String(sessionId));
+        if (history.length > 0)
+          params.append("conversation_history", JSON.stringify(history));
+
+        const getRes = await fetch(
+          `${API_URL}/api/query?${params.toString()}`,
+          { method: "GET" }
         );
-        if (proxyRes.data && proxyRes.data.answer_english) {
-          data = proxyRes.data;
-        } else if (proxyRes.data && proxyRes.data.detail) {
-          console.warn("[query] Strategy 1 returned detail:", proxyRes.data.detail);
+        if (getRes.ok) {
+          const json = await getRes.json();
+          if (json && json.answer_english) {
+            data = json;
+          }
         }
       } catch (e1: any) {
-        if (e1?.response?.status === 401) throw e1;
-        console.warn("[query] Strategy 1 /api/query failed:", e1?.message || e1);
+        console.warn("[query] Strategy 1 GET failed:", e1?.message || e1);
       }
 
-      // Strategy 2: Direct backend GET with query params — CORS-safe simple request
-      // GET is always a simple CORS request (no OPTIONS preflight). Works once GET is deployed.
+      // Strategy 2: Dedicated Next.js /api/query route fallback
       if (!data) {
         try {
-          const params = new URLSearchParams({
-            query: currentQuery,
-            language: language,
-            token: token,
-          });
-          if (sessionId) params.append("session_id", String(sessionId));
-          if (history.length > 0)
-            params.append("conversation_history", JSON.stringify(history));
-
-          const getRes = await fetch(
-            `${API_URL}/api/query?${params.toString()}`,
-            { method: "GET" }
+          const proxyRes = await axios.post(
+            `/api/query`,
+            {
+              query: currentQuery,
+              language: language,
+              session_id: sessionId,
+              conversation_history: history,
+            },
+            {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              timeout: 55000,
+            }
           );
-          if (getRes.ok) {
-            const json = await getRes.json();
-            if (json && json.answer_english) data = json;
+          if (proxyRes.data && proxyRes.data.answer_english) {
+            data = proxyRes.data;
           }
         } catch (e2: any) {
-          console.warn("[query] Strategy 2 GET failed:", e2?.message || e2);
+          if (e2?.response?.status === 401) throw e2;
+          console.warn("[query] Strategy 2 proxy failed:", e2?.message || e2);
         }
       }
 

@@ -306,29 +306,45 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Direct backend JSON query (Fast, returns 200 OK with Gemini LLM response)
+      // Strategy 1: Direct GET request (Simple request — NEVER triggers CORS OPTIONS preflight, bypasses ZGS load balancer)
       try {
-        const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            query: currentQuery,
-            language: language,
-            session_id: sessionId,
-            conversation_history: history,
-          }),
-        });
-        if (directRes.ok) {
-          const json = await directRes.json();
+        const getUrl = `${API_URL}/api/query?query=${encodeURIComponent(currentQuery)}&language=${encodeURIComponent(language)}${sessionId ? `&session_id=${sessionId}` : ""}&token=${encodeURIComponent(token)}`;
+        const getRes = await fetch(getUrl, { method: "GET" });
+        if (getRes.ok) {
+          const json = await getRes.json();
           if (json && json.answer_english) {
             data = json;
           }
         }
       } catch {
-        // Direct query failed — fall through to SSR Proxy Strategy 2
+        // GET failed — fall through to direct POST
       }
 
-      // Strategy 2: Try SSR Proxy
+      // Strategy 2: Direct backend POST query
+      if (!data) {
+        try {
+          const directRes = await fetch(`${API_URL}/api/query?token=${token}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query: currentQuery,
+              language: language,
+              session_id: sessionId,
+              conversation_history: history,
+            }),
+          });
+          if (directRes.ok) {
+            const json = await directRes.json();
+            if (json && json.answer_english) {
+              data = json;
+            }
+          }
+        } catch {
+          // Direct POST failed
+        }
+      }
+
+      // Strategy 3: Try SSR Proxy
       if (!data) {
         try {
           const proxyRes = await axios.post(

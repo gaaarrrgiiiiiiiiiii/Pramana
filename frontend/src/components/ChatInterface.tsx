@@ -306,11 +306,12 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Next.js SSR Proxy POST — no CORS at all (same-origin server-side fetch)
-      // This is the primary strategy and most reliable. route.ts has 55s timeout for LLM calls.
+      // Strategy 1: Dedicated Next.js /api/query route (same-origin, NO CORS, NO Brotli issue)
+      // This server-side route calls the backend with Accept-Encoding: identity to avoid
+      // the Brotli decompression bug in Slate's reverse proxy layer.
       try {
         const proxyRes = await axios.post(
-          `/api/proxy/api/query?token=${token}`,
+          `/api/query`,
           {
             query: currentQuery,
             language: language,
@@ -319,19 +320,17 @@ export default function ChatInterface({
           },
           {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
-            timeout: 50000, // 50s — LLM calls can take 20-30s
+            timeout: 55000,
           }
         );
         if (proxyRes.data && proxyRes.data.answer_english) {
           data = proxyRes.data;
         } else if (proxyRes.data && proxyRes.data.detail) {
-          // Proxy returned an error detail — propagate it
-          throw new Error(proxyRes.data.detail);
+          console.warn("[query] Strategy 1 returned detail:", proxyRes.data.detail);
         }
       } catch (e1: any) {
-        // 401 → redirect to login immediately
         if (e1?.response?.status === 401) throw e1;
-        console.warn("[query] Strategy 1 proxy failed:", e1?.message || e1);
+        console.warn("[query] Strategy 1 /api/query failed:", e1?.message || e1);
       }
 
       // Strategy 2: Direct backend GET with query params — CORS-safe simple request

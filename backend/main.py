@@ -39,9 +39,19 @@ log = get_logger("main")
 # ── Rate limiter (per IP — roles enforced per-endpoint) ──────────────────────
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="Pramana — Karnataka Police Investigative Co-Pilot", version="3.0.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 from fastapi.exceptions import RequestValidationError
 
@@ -267,7 +277,12 @@ ROLE_RATE_LIMITS = {
     "Field Officer":"30/minute",
 }
 
-@app.api_route("/api/query", methods=["GET", "POST"], tags=["Query"])
+@app.api_route(
+    "/api/query",
+    methods=["GET", "POST"],
+    tags=["Query"],
+    openapi_extra={"requestBody": {"content": {"*/*": {}}}}
+)
 @limiter.limit("60/minute")
 async def process_query(
     request: Request,

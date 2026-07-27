@@ -268,6 +268,13 @@ ROLE_RATE_LIMITS = {
 }
 
 @app.get("/api/query", tags=["Query"])
+@limiter.limit("60/minute")
+async def process_query_get(
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    return await process_query(request, current_user)
+
 @app.post("/api/query", tags=["Query"])
 @limiter.limit("60/minute")
 async def process_query(

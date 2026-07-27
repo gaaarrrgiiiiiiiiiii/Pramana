@@ -6,6 +6,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Send, Mic, Loader2, Plus, MessageSquare, ThumbsUp, ThumbsDown, Sparkles, X, Volume2, Sparkle } from "lucide-react";
 import axios from "axios";
 import { SUPPORTED_LANGUAGES } from "./LanguageSelector";
+import { apiFetch } from "@/lib/apiFetch";
 
 interface Message {
   role: "user" | "agent";
@@ -92,35 +93,32 @@ export default function ChatInterface({
 
     const token = localStorage.getItem("token") || "";
     setIsSessionLoading(true);
-    axios
-      .get(`${PROXY}/api/proxy/api/sessions/${activeSessionId}?token=${token}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((res) => {
-        const rawMsgs = res.data.messages || [];
-        const loadedMsgs: Message[] = [];
-        const loadedHistory: any[] = [];
+    apiFetch(`/api/sessions/${activeSessionId}`, { token })
+      .then(({ ok, data }) => {
+        if (ok && data) {
+          const rawMsgs = data.messages || [];
+          const loadedMsgs: Message[] = [];
+          const loadedHistory: any[] = [];
 
-        rawMsgs.forEach((m: any) => {
-          loadedMsgs.push({ role: "user", text: m.query });
-          loadedMsgs.push({
-            role: "agent",
-            text: m.answer_english || "",
-            translated: m.answer_translated || "",
-            language: m.language || "English",
-            messageId: m.id,
-            feedback: m.feedback,
+          rawMsgs.forEach((m: any) => {
+            loadedMsgs.push({ role: "user", text: m.query });
+            loadedMsgs.push({
+              role: "agent",
+              text: m.answer_english || "",
+              translated: m.answer_translated || "",
+              language: m.language || "English",
+              messageId: m.id,
+              feedback: m.feedback,
+            });
+            loadedHistory.push({ query: m.query, answer_english: m.answer_english });
           });
-          loadedHistory.push({ query: m.query, answer_english: m.answer_english });
-        });
 
-        setMessages(loadedMsgs);
-        setHistory(loadedHistory.slice(-5));
+          setMessages(loadedMsgs);
+          setHistory(loadedHistory.slice(-5));
+        }
         setIsSessionLoading(false);
       })
-      .catch(() => {
-        setIsSessionLoading(false);
-      });
+      .catch(() => setIsSessionLoading(false));
   }, [activeSessionId]);
 
   const getSpeechLangCode = (lang: string): string => {
@@ -266,11 +264,7 @@ export default function ChatInterface({
     if (!msg.messageId || msg.feedback !== null) return;
     try {
       const token = localStorage.getItem("token") || "";
-      await axios.post(
-        `/api/proxy/api/feedback?token=${token}`,
-        { message_id: msg.messageId, feedback: value },
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-      );
+      await apiFetch(`/api/feedback?message_id=${msg.messageId}&feedback=${value}`, { token });
       setMessages((prev) =>
         prev.map((m, i) => (i === msgIndex ? { ...m, feedback: value } : m))
       );
@@ -306,8 +300,7 @@ export default function ChatInterface({
 
       let data: any = null;
 
-      // Strategy 1: Direct backend GET with query params — CORS-safe simple request
-      // GET requests are simple requests in browsers: NO OPTIONS preflight is ever sent by the browser.
+      // Strategy 1: Direct backend GET with query params — CORS-safe simple request (NO OPTIONS preflight)
       try {
         const params = new URLSearchParams({
           query: currentQuery,
@@ -332,54 +325,31 @@ export default function ChatInterface({
         console.warn("[query] Strategy 1 GET failed:", e1?.message || e1);
       }
 
-      // Strategy 2: Dedicated Next.js /api/query route fallback
+      // Strategy 2: Form-urlencoded POST fallback
       if (!data) {
         try {
-          const proxyRes = await axios.post(
-            `/api/query`,
-            {
-              query: currentQuery,
-              language: language,
-              session_id: sessionId,
-              conversation_history: history,
-            },
-            {
-              headers: token ? { Authorization: `Bearer ${token}` } : {},
-              timeout: 55000,
-            }
-          );
-          if (proxyRes.data && proxyRes.data.answer_english) {
-            data = proxyRes.data;
-          }
-        } catch (e2: any) {
-          if (e2?.response?.status === 401) throw e2;
-          console.warn("[query] Strategy 2 proxy failed:", e2?.message || e2);
-        }
-      }
+          const formBody = new URLSearchParams();
+          formBody.append("query", currentQuery);
+          formBody.append("language", language);
+          formBody.append("token", token);
+          if (sessionId) formBody.append("session_id", String(sessionId));
+          if (history.length > 0)
+            formBody.append("conversation_history", JSON.stringify(history));
 
-      // Strategy 3: Direct POST with JSON — works if browser CORS allows it
-      // (Requires ZGS OPTIONS to forward properly — may not work in all environments)
-      if (!data) {
-        try {
           const postRes = await fetch(
             `${API_URL}/api/query?token=${token}`,
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                query: currentQuery,
-                language: language,
-                session_id: sessionId,
-                conversation_history: history,
-              }),
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: formBody.toString(),
             }
           );
           if (postRes.ok) {
             const json = await postRes.json();
             if (json && json.answer_english) data = json;
           }
-        } catch (e3: any) {
-          console.warn("[query] Strategy 3 direct POST failed:", e3?.message || e3);
+        } catch (e2: any) {
+          console.warn("[query] Strategy 2 form POST failed:", e2?.message || e2);
         }
       }
 

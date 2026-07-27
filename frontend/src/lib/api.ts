@@ -1,17 +1,16 @@
 /**
- * Central API client for Pramana frontend.
- *
- * All calls go through /api/proxy/... (Next.js server-side route) so the
- * browser never makes a cross-origin request and CORS preflights are
- * completely avoided.
+ * Central API client helper for Pramana frontend.
  */
 
-// Always use the Next.js proxy — empty string means same origin
-export const PROXY_BASE = "";
+const BACKEND =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://pramana-api-50044352049.development.catalystappsail.in";
+
+export const PROXY_BASE = BACKEND;
 
 export function buildUrl(path: string, token?: string | null): string {
-  // path examples: "api/query", "api/sessions", "api/sessions/3"
-  const base = `/api/proxy/${path}`;
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const base = `${BACKEND}${cleanPath}`;
   if (token) {
     const sep = base.includes("?") ? "&" : "?";
     return `${base}${sep}token=${encodeURIComponent(token)}`;
@@ -24,7 +23,7 @@ export function getToken(): string | null {
   return localStorage.getItem("token");
 }
 
-export function getAuthHeaders(token?: string | null): HeadersInit {
-  const t = token ?? getToken();
-  return t ? { Authorization: `Bearer ${t}`, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
+export function getAuthHeaders(): HeadersInit {
+  // Returns empty headers for simple GET requests to avoid triggering CORS OPTIONS preflights
+  return {};
 }

@@ -640,22 +640,47 @@ async def process_query(
 
 
 # ── Feedback endpoint (👍/👎) ─────────────────────────────────────────────────
-@app.post("/api/feedback", tags=["Query"])
+@app.api_route("/api/feedback", methods=["GET", "POST"], tags=["Query"])
 async def submit_feedback(
-    req: FeedbackRequest,
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Record helpful (+1) or unhelpful (-1) feedback on a specific answer."""
-    if req.feedback not in (1, -1):
-        raise HTTPException(status_code=422, detail="feedback must be +1 or -1")
+    message_id = None
+    feedback_val = None
+
+    # 1. Try query parameters (for simple GET requests)
+    mid_str = request.query_params.get("message_id")
+    fb_str = request.query_params.get("feedback")
+    if mid_str and fb_str:
+        try:
+            message_id = int(mid_str)
+            feedback_val = int(fb_str)
+        except (ValueError, TypeError):
+            pass
+
+    # 2. Try JSON / form body
+    if not message_id or not feedback_val:
+        try:
+            raw_body = await request.body()
+            if raw_body:
+                body_json = json.loads(raw_body.decode("utf-8", errors="ignore"))
+                if isinstance(body_json, dict):
+                    message_id = body_json.get("message_id")
+                    feedback_val = body_json.get("feedback")
+        except Exception:
+            pass
+
+    if feedback_val not in (1, -1) or not message_id:
+        raise HTTPException(status_code=422, detail="message_id and feedback (+1 or -1) required")
+
     try:
         conn = get_db_connection()
         cur  = conn.cursor()
         # Only the message owner can submit feedback
         cur.execute(
             "UPDATE messages SET feedback = %s WHERE id = %s AND user_id = %s RETURNING id",
-            (req.feedback, req.message_id, current_user.get("id"))
+            (feedback_val, message_id, current_user.get("id"))
         )
         updated = cur.fetchone()
         conn.commit()
